@@ -12,10 +12,10 @@ environment:
   GOPATH: C:\gopath
   CGO_ENABLED: 1
   matrix:
-    - GO_VERSION: 1.10
+    - GO_VERSION: 1.11
 
 before_build:
-  - choco install -y mingw
+  - choco install -y mingw --version 5.3.0
   # Install Go
   - rd C:\Go /s /q
   - appveyor DownloadFile https://storage.googleapis.com/golang/go%GO_VERSION%.windows-amd64.zip

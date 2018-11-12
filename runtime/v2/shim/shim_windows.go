@@ -27,7 +27,6 @@ import (
 	"os"
 	"os/exec"
 	"sync"
-	"syscall"
 	"unsafe"
 
 	winio "github.com/Microsoft/go-winio"
@@ -38,10 +37,6 @@ import (
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/sys/windows"
-)
-
-const (
-	errorConnectionAborted syscall.Errno = 1236
 )
 
 // setupSignals creates a new signal handler for all signals
@@ -196,7 +191,7 @@ type deferredShimWriteLogger struct {
 	conerr error
 }
 
-// beginAccept issues an accept to wait for a connection. Once a conneciton
+// beginAccept issues an accept to wait for a connection. Once a connection
 // occurs drains any outstanding buffer. While draining the buffer any writes
 // are blocked. If the buffer fails to fully drain due to a connection drop a
 // call to `beginAccept` is re-issued waiting for another connection from
@@ -209,7 +204,7 @@ func (dswl *deferredShimWriteLogger) beginAccept() {
 	dswl.mu.Unlock()
 
 	c, err := dswl.l.Accept()
-	if err == errorConnectionAborted {
+	if err == winio.ErrPipeListenerClosed {
 		dswl.mu.Lock()
 		dswl.aborted = true
 		dswl.l.Close()

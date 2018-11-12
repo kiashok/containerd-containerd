@@ -71,7 +71,7 @@ TEST_REQUIRES_ROOT_PACKAGES=$(filter \
     )
 
 # Project binaries.
-COMMANDS=ctr containerd containerd-stress containerd-release
+COMMANDS=ctr containerd containerd-stress
 MANPAGES=ctr.1 containerd.1 containerd-config.1 containerd-config.toml.5
 
 # Build tags seccomp and apparmor are needed by CRI plugin.
@@ -116,11 +116,11 @@ AUTHORS: .mailmap .git/HEAD
 
 generate: protos
 	@echo "$(WHALE) $@"
-	@PATH=${ROOTDIR}/bin:${PATH} go generate -x ${PACKAGES}
+	@PATH="${ROOTDIR}/bin:${PATH}" go generate -x ${PACKAGES}
 
 protos: bin/protoc-gen-gogoctrd ## generate protobuf
 	@echo "$(WHALE) $@"
-	@PATH=${ROOTDIR}/bin:${PATH} protobuild --quiet ${PACKAGES}
+	@PATH="${ROOTDIR}/bin:${PATH}" protobuild --quiet ${PACKAGES}
 
 check-protos: protos ## check if protobufs needs to be generated again
 	@echo "$(WHALE) $@"
