@@ -86,9 +86,10 @@ func parseMountFlag(m string) (specs.Mount, error) {
 
 // Command runs a container
 var Command = cli.Command{
-	Name:      "run",
-	Usage:     "run a container",
-	ArgsUsage: "[flags] Image|RootFS ID [COMMAND] [ARG...]",
+	Name:           "run",
+	Usage:          "run a container",
+	ArgsUsage:      "[flags] Image|RootFS ID [COMMAND] [ARG...]",
+	SkipArgReorder: true,
 	Flags: append([]cli.Flag{
 		cli.BoolFlag{
 			Name:  "rm",
@@ -106,15 +107,11 @@ var Command = cli.Command{
 			Name:  "fifo-dir",
 			Usage: "directory used for storing IO FIFOs",
 		},
-		cli.BoolFlag{
-			Name:  "isolated",
-			Usage: "run the container with vm isolation",
-		},
 		cli.StringFlag{
 			Name:  "cgroup",
 			Usage: "cgroup path (To disable use of cgroup, set to \"\" explicitly)",
 		},
-	}, append(commands.SnapshotterFlags, commands.ContainerFlags...)...),
+	}, append(platformRunFlags, append(commands.SnapshotterFlags, commands.ContainerFlags...)...)...),
 	Action: func(context *cli.Context) error {
 		var (
 			err error
