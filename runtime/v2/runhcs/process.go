@@ -21,7 +21,6 @@ package runhcs
 import (
 	"context"
 	"os"
-	"os/exec"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -46,7 +45,6 @@ func newProcess(ctx context.Context, s *service, id string, pid uint32, pr *pipe
 	process := &process{
 		cid:       id,
 		id:        id,
-		pid:       pid,
 		bundle:    bundle,
 		stdin:     stdin,
 		stdout:    stdout,
@@ -55,6 +53,14 @@ func newProcess(ctx context.Context, s *service, id string, pid uint32, pr *pipe
 		relay:     pr,
 		waitBlock: make(chan struct{}),
 	}
+	go waitForProcess(ctx, process, p, s)
+	return process, nil
+}
+
+func waitForProcess(ctx context.Context, process *process, p *os.Process, s *service) {
+	pid := uint32(p.Pid)
+	process.startedWg.Add(1)
+
 	// Store the default non-exited value for calls to stat
 	process.exit.Store(&processExit{
 		pid:        pid,
@@ -62,24 +68,19 @@ func newProcess(ctx context.Context, s *service, id string, pid uint32, pr *pipe
 		exitedAt:   time.Time{},
 		exitErr:    nil,
 	})
-	go waitForProcess(ctx, process, p, s)
-	return process, nil
-}
 
-func waitForProcess(ctx context.Context, process *process, p *os.Process, s *service) {
 	var status int
-	_, eerr := p.Wait()
+	processState, eerr := p.Wait()
 	if eerr != nil {
 		status = 255
-		if exitErr, ok := eerr.(*exec.ExitError); ok {
-			if ws, ok := exitErr.Sys().(syscall.WaitStatus); ok {
-				status = ws.ExitStatus()
-			}
-		}
+		p.Kill()
+	} else {
+		status = processState.Sys().(syscall.WaitStatus).ExitStatus()
 	}
+
 	now := time.Now()
 	process.exit.Store(&processExit{
-		pid:        process.pid,
+		pid:        pid,
 		exitStatus: uint32(status),
 		exitedAt:   now,
 		exitErr:    eerr,
@@ -88,19 +89,24 @@ func waitForProcess(ctx context.Context, process *process, p *os.Process, s *ser
 	// Wait for the relay
 	process.relay.wait()
 
-	// close the client io, and free upstream waiters
-	process.close()
+	// Wait for the started event to fire if it hasn't already
+	process.startedWg.Wait()
 
+	// We publish the exit before freeing upstream so that the exit event always
+	// happens before any delete event.
 	s.publisher.Publish(
 		ctx,
 		runtime.TaskExitEventTopic,
 		&eventstypes.TaskExit{
 			ContainerID: process.cid,
 			ID:          process.id,
-			Pid:         process.pid,
+			Pid:         pid,
 			ExitStatus:  uint32(status),
 			ExitedAt:    now,
 		})
+
+	// close the client io, and free upstream waiters
+	process.close()
 }
 
 func newExecProcess(ctx context.Context, s *service, cid, id string, pr *pipeRelay, bundle, stdin, stdout, stderr string, terminal bool) (*process, error) {
@@ -115,8 +121,11 @@ func newExecProcess(ctx context.Context, s *service, cid, id string, pr *pipeRel
 		relay:     pr,
 		waitBlock: make(chan struct{}),
 	}
+	process.startedWg.Add(1)
+
 	// Store the default non-exited value for calls to stat
 	process.exit.Store(&processExit{
+		pid:        0, // This is updated when the call to Start happens and the state is overwritten in waitForProcess.
 		exitStatus: 255,
 		exitedAt:   time.Time{},
 		exitErr:    nil,
@@ -129,7 +138,6 @@ type process struct {
 
 	cid string
 	id  string
-	pid uint32
 
 	bundle   string
 	stdin    string
@@ -140,7 +148,8 @@ type process struct {
 
 	// started track if the process has ever been started and will not be reset
 	// for the lifetime of the process object.
-	started bool
+	started   bool
+	startedWg sync.WaitGroup
 
 	waitBlock chan struct{}
 	// exit holds the exit value for all calls to `stat`. By default a

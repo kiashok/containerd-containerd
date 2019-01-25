@@ -37,6 +37,7 @@ import (
 
 	winio "github.com/Microsoft/go-winio"
 	"github.com/Microsoft/hcsshim/pkg/go-runhcs"
+	eventstypes "github.com/containerd/containerd/api/events"
 	containerd_types "github.com/containerd/containerd/api/types"
 	"github.com/containerd/containerd/api/types/task"
 	"github.com/containerd/containerd/errdefs"
@@ -44,6 +45,7 @@ import (
 	"github.com/containerd/containerd/log"
 	"github.com/containerd/containerd/mount"
 	"github.com/containerd/containerd/namespaces"
+	"github.com/containerd/containerd/runtime"
 	"github.com/containerd/containerd/runtime/v2/runhcs/options"
 	"github.com/containerd/containerd/runtime/v2/shim"
 	taskAPI "github.com/containerd/containerd/runtime/v2/task"
@@ -325,7 +327,7 @@ func (s *service) State(ctx context.Context, r *taskAPI.StateRequest) (*taskAPI.
 	return &taskAPI.StateResponse{
 		ID:         p.id,
 		Bundle:     p.bundle,
-		Pid:        p.pid,
+		Pid:        pe.pid,
 		Status:     status,
 		Stdin:      p.stdin,
 		Stdout:     p.stdout,
@@ -337,7 +339,25 @@ func (s *service) State(ctx context.Context, r *taskAPI.StateRequest) (*taskAPI.
 }
 
 func writeMountsToConfig(bundle string, mounts []*containerd_types.Mount) error {
-	if len(mounts) != 1 {
+	cf, err := os.OpenFile(path.Join(bundle, "config.json"), os.O_RDWR, 0)
+	if err != nil {
+		return errors.Wrap(err, "bundle does not contain config.json")
+	}
+	defer cf.Close()
+	var spec oci.Spec
+	if err := json.NewDecoder(cf).Decode(&spec); err != nil {
+		return errors.Wrap(err, "bundle config.json is not valid oci spec")
+	}
+
+	if len(mounts) == 0 {
+		// If no mounts are passed via the snapshotter its the callers full
+		// responsibility to manage the storage. Just move on without affecting
+		// the config.json at all.
+		if spec.Windows == nil || len(spec.Windows.LayerFolders) < 2 {
+			return errors.New("no Windows.LayerFolders found in oci spec")
+		}
+		return nil
+	} else if len(mounts) != 1 {
 		return errors.New("Rootfs does not contain exactly 1 mount for the root file system")
 	}
 
@@ -367,29 +387,19 @@ func writeMountsToConfig(bundle string, mounts []*containerd_types.Mount) error 
 			opp := len(parentLayerPaths) - 1 - i
 			parentLayerPaths[i], parentLayerPaths[opp] = parentLayerPaths[opp], parentLayerPaths[i]
 		}
-	}
 
-	cf, err := os.OpenFile(path.Join(bundle, "config.json"), os.O_RDWR, 0)
-	if err != nil {
-		return errors.Wrap(err, "bundle does not contain config.json")
-	}
-	defer cf.Close()
-	var spec oci.Spec
-	if err := json.NewDecoder(cf).Decode(&spec); err != nil {
-		return errors.Wrap(err, "bundle config.json is not valid oci spec")
-	}
-	if err := cf.Truncate(0); err != nil {
-		return errors.Wrap(err, "failed to truncate config.json")
-	}
-	if _, err := cf.Seek(0, 0); err != nil {
-		return errors.Wrap(err, "failed to seek to 0 in config.json")
-	}
-
-	// If we are creating LCOW make sure that spec.Windows is filled out before
-	// appending layer folders.
-	if m.Type == "lcow-layer" && spec.Windows == nil {
-		spec.Windows = &oci.Windows{
-			HyperV: &oci.WindowsHyperV{},
+		// If we are creating LCOW make sure that spec.Windows is filled out before
+		// appending layer folders.
+		if spec.Windows == nil {
+			spec.Windows = &oci.Windows{}
+		}
+		if spec.Windows.HyperV == nil {
+			spec.Windows.HyperV = &oci.WindowsHyperV{}
+		}
+	} else if spec.Windows.HyperV == nil {
+		// This is a Windows Argon make sure that we have a Root filled in.
+		if spec.Root == nil {
+			spec.Root = &oci.Root{}
 		}
 	}
 
@@ -397,6 +407,13 @@ func writeMountsToConfig(bundle string, mounts []*containerd_types.Mount) error 
 	spec.Windows.LayerFolders = append(spec.Windows.LayerFolders, parentLayerPaths...)
 	// Append the scratch
 	spec.Windows.LayerFolders = append(spec.Windows.LayerFolders, m.Source)
+
+	if err := cf.Truncate(0); err != nil {
+		return errors.Wrap(err, "failed to truncate config.json")
+	}
+	if _, err := cf.Seek(0, 0); err != nil {
+		return errors.Wrap(err, "failed to seek to 0 in config.json")
+	}
 
 	if err := json.NewEncoder(cf).Encode(spec); err != nil {
 		return errors.Wrap(err, "failed to write Mounts into config.json")
@@ -578,6 +595,22 @@ func (s *service) Create(ctx context.Context, r *taskAPI.CreateTaskRequest) (*ta
 	}
 	s.processes[r.ID] = process
 
+	s.publisher.Publish(ctx,
+		runtime.TaskCreateEventTopic,
+		&eventstypes.TaskCreate{
+			ContainerID: process.id,
+			Bundle:      process.bundle,
+			Rootfs:      r.Rootfs,
+			IO: &eventstypes.TaskIO{
+				Stdin:    r.Stdin,
+				Stdout:   r.Stdout,
+				Stderr:   r.Stderr,
+				Terminal: r.Terminal,
+			},
+			Checkpoint: "",
+			Pid:        uint32(pid),
+		})
+
 	return &taskAPI.CreateTaskResponse{
 		Pid: uint32(pid),
 	}, nil
@@ -667,7 +700,6 @@ func (s *service) Start(ctx context.Context, r *taskAPI.StartRequest) (*taskAPI.
 		if err != nil {
 			return nil, errors.Wrap(err, "failed to find exec process pid")
 		}
-		p.pid = uint32(pid)
 		go waitForProcess(ctx, p, proc, s)
 	} else {
 		if err := rhcs.Start(ctx, p.id); err != nil {
@@ -697,8 +729,29 @@ func (s *service) Start(ctx context.Context, r *taskAPI.StartRequest) (*taskAPI.
 			time.Sleep(1 * time.Second)
 		}
 	}
+
+	pid := p.stat().pid
+	if r.ExecID != "" {
+		s.publisher.Publish(ctx,
+			runtime.TaskExecStartedEventTopic,
+			&eventstypes.TaskExecStarted{
+				ContainerID: p.cid,
+				ExecID:      p.id,
+				Pid:         pid,
+			})
+	} else {
+		s.publisher.Publish(ctx,
+			runtime.TaskStartEventTopic,
+			&eventstypes.TaskStart{
+				ContainerID: p.id,
+				Pid:         pid,
+			})
+	}
+
+	p.startedWg.Done()
+
 	return &taskAPI.StartResponse{
-		Pid: p.pid,
+		Pid: pid,
 	}, nil
 }
 
@@ -735,10 +788,18 @@ func (s *service) Delete(ctx context.Context, r *taskAPI.DeleteRequest) (*taskAP
 	s.mu.Lock()
 	delete(s.processes, p.id)
 	s.mu.Unlock()
+
+	s.publisher.Publish(ctx, runtime.TaskDeleteEventTopic, &eventstypes.TaskDelete{
+		ContainerID: p.id,
+		Pid:         exit.pid,
+		ExitStatus:  exit.exitStatus,
+		ExitedAt:    exit.exitedAt,
+	})
+
 	return &taskAPI.DeleteResponse{
 		ExitedAt:   exit.exitedAt,
 		ExitStatus: exit.exitStatus,
-		Pid:        p.pid,
+		Pid:        exit.pid,
 	}, nil
 }
 
@@ -765,6 +826,10 @@ func (s *service) Pause(ctx context.Context, r *taskAPI.PauseRequest) (*ptypes.E
 		return nil, err
 	}
 
+	s.publisher.Publish(ctx, runtime.TaskPausedEventTopic, &eventstypes.TaskPaused{
+		r.ID,
+	})
+
 	return empty, nil
 }
 
@@ -783,6 +848,10 @@ func (s *service) Resume(ctx context.Context, r *taskAPI.ResumeRequest) (*ptypes
 	if err = rhcs.Resume(ctx, p.id); err != nil {
 		return nil, err
 	}
+
+	s.publisher.Publish(ctx, runtime.TaskResumedEventTopic, &eventstypes.TaskResumed{
+		r.ID,
+	})
 
 	return empty, nil
 }
@@ -895,6 +964,13 @@ func (s *service) Exec(ctx context.Context, r *taskAPI.ExecProcessRequest) (*pty
 	}
 	s.processes[r.ExecID] = process
 
+	s.publisher.Publish(ctx,
+		runtime.TaskExecAddedEventTopic,
+		&eventstypes.TaskExecAdded{
+			ContainerID: process.cid,
+			ExecID:      process.id,
+		})
+
 	return empty, nil
 }
 
@@ -908,7 +984,7 @@ func (s *service) ResizePty(ctx context.Context, r *taskAPI.ResizePtyRequest) (*
 		return nil, err
 	}
 
-	pid := int(p.pid)
+	pid := int(p.stat().pid)
 	opts := runhcs.ResizeTTYOpts{
 		Pid: &pid,
 	}
@@ -967,9 +1043,15 @@ func (s *service) Stats(ctx context.Context, r *taskAPI.StatsRequest) (*taskAPI.
 func (s *service) Connect(ctx context.Context, r *taskAPI.ConnectRequest) (*taskAPI.ConnectResponse, error) {
 	log.G(ctx).Debugf("Connect: %s", r.ID)
 
+	var taskpid uint32
+	p, _ := s.getProcess(r.ID, "")
+	if p != nil {
+		taskpid = p.stat().pid
+	}
+
 	return &taskAPI.ConnectResponse{
 		ShimPid: uint32(os.Getpid()),
-		TaskPid: s.processes[s.id].pid,
+		TaskPid: taskpid,
 		Version: runhcsShimVersion,
 	}, nil
 }
