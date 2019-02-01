@@ -60,7 +60,7 @@ func newProcess(ctx context.Context, s *service, id string, pid uint32, pr *pipe
 
 // waitForProcess waits for `p` to exit.
 //
-// The caller of `waitForProcess` MUST have increment `process.startedWg` to
+// The caller of `waitForProcess` MUST have incremented `process.startedWg` to
 // synchronize event start/exit publishing.
 func waitForProcess(ctx context.Context, process *process, p *os.Process, s *service) {
 	pid := uint32(p.Pid)
