@@ -29,6 +29,7 @@ import (
 
 	"github.com/containerd/containerd/log"
 	"github.com/containerd/containerd/mount"
+	"github.com/containerd/containerd/oc"
 	"github.com/containerd/containerd/services/server"
 	srvconfig "github.com/containerd/containerd/services/server/config"
 	"github.com/containerd/containerd/sys"
@@ -36,6 +37,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"github.com/urfave/cli"
+	"go.opencensus.io/trace"
 	"google.golang.org/grpc/grpclog"
 )
 
@@ -115,6 +117,9 @@ func App() *cli.App {
 		if err := applyFlags(context, config); err != nil {
 			return err
 		}
+
+		trace.RegisterExporter(&oc.LogrusExporter{})
+		trace.ApplyConfig(trace.Config{DefaultSampler: trace.AlwaysSample()})
 
 		// Make sure top-level directories are created early.
 		if err := server.CreateTopLevelDirectories(config); err != nil {
