@@ -42,6 +42,7 @@ import (
 	"github.com/containerd/containerd/plugin"
 	"github.com/containerd/containerd/runtime/linux/runctypes"
 	"github.com/containerd/containerd/runtime/v2/runc/options"
+	"github.com/containerd/containerd/sys"
 	specs "github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/pkg/errors"
 	"golang.org/x/sys/unix"
@@ -57,7 +58,7 @@ func TestTaskUpdate(t *testing.T) {
 	defer client.Close()
 
 	var (
-		ctx, cancel = testContext()
+		ctx, cancel = testContext(t)
 		id          = t.Name()
 	)
 	defer cancel()
@@ -133,12 +134,8 @@ func TestShimInCgroup(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer client.Close()
-	if CheckRuntime(client.runtime, "io.containerd.runc") {
-		t.Skip()
-	}
-
 	var (
-		ctx, cancel = testContext()
+		ctx, cancel = testContext(t)
 		id          = t.Name()
 	)
 	defer cancel()
@@ -160,12 +157,7 @@ func TestShimInCgroup(t *testing.T) {
 	}
 	defer cg.Delete()
 
-	task, err := container.NewTask(ctx, empty(), func(_ context.Context, client *Client, r *TaskInfo) error {
-		r.Options = &runctypes.CreateOptions{
-			ShimCgroup: path,
-		}
-		return nil
-	})
+	task, err := container.NewTask(ctx, empty(), WithShimCgroup(path))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,7 +192,7 @@ func TestDaemonRestart(t *testing.T) {
 
 	var (
 		image       Image
-		ctx, cancel = testContext()
+		ctx, cancel = testContext(t)
 		id          = t.Name()
 	)
 	defer cancel()
@@ -276,7 +268,7 @@ func TestShimDoesNotLeakPipes(t *testing.T) {
 
 	var (
 		image       Image
-		ctx, cancel = testContext()
+		ctx, cancel = testContext(t)
 		id          = t.Name()
 	)
 	defer cancel()
@@ -330,7 +322,7 @@ func TestShimDoesNotLeakPipes(t *testing.T) {
 }
 
 func numPipes(pid int) (int, error) {
-	cmd := exec.Command("sh", "-c", fmt.Sprintf("lsof -p %d | grep pipe", pid))
+	cmd := exec.Command("sh", "-c", fmt.Sprintf("lsof -p %d | grep FIFO", pid))
 
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
@@ -349,7 +341,7 @@ func TestDaemonReconnectsToShimIOPipesOnRestart(t *testing.T) {
 
 	var (
 		image       Image
-		ctx, cancel = testContext()
+		ctx, cancel = testContext(t)
 		id          = t.Name()
 	)
 	defer cancel()
@@ -479,7 +471,7 @@ func TestContainerPTY(t *testing.T) {
 
 	var (
 		image       Image
-		ctx, cancel = testContext()
+		ctx, cancel = testContext(t)
 		id          = t.Name()
 	)
 	defer cancel()
@@ -556,7 +548,7 @@ func TestContainerAttach(t *testing.T) {
 
 	var (
 		image       Image
-		ctx, cancel = testContext()
+		ctx, cancel = testContext(t)
 		id          = t.Name()
 	)
 	defer cancel()
@@ -701,7 +693,7 @@ func TestContainerUsername(t *testing.T) {
 
 	var (
 		image       Image
-		ctx, cancel = testContext()
+		ctx, cancel = testContext(t)
 		id          = t.Name()
 	)
 	defer cancel()
@@ -776,7 +768,7 @@ func testContainerUser(t *testing.T, userstr, expectedOutput string) {
 
 	var (
 		image       Image
-		ctx, cancel = testContext()
+		ctx, cancel = testContext(t)
 		id          = strings.Replace(t.Name(), "/", "_", -1)
 	)
 	defer cancel()
@@ -851,7 +843,7 @@ func TestContainerAttachProcess(t *testing.T) {
 
 	var (
 		image       Image
-		ctx, cancel = testContext()
+		ctx, cancel = testContext(t)
 		id          = t.Name()
 	)
 	defer cancel()
@@ -968,7 +960,7 @@ func TestContainerUserID(t *testing.T) {
 
 	var (
 		image       Image
-		ctx, cancel = testContext()
+		ctx, cancel = testContext(t)
 		id          = t.Name()
 	)
 	defer cancel()
@@ -1037,7 +1029,7 @@ func TestContainerKillAll(t *testing.T) {
 
 	var (
 		image       Image
-		ctx, cancel = testContext()
+		ctx, cancel = testContext(t)
 		id          = t.Name()
 	)
 	defer cancel()
@@ -1094,7 +1086,7 @@ func TestDaemonRestartWithRunningShim(t *testing.T) {
 
 	var (
 		image       Image
-		ctx, cancel = testContext()
+		ctx, cancel = testContext(t)
 		id          = t.Name()
 	)
 	defer cancel()
@@ -1175,7 +1167,7 @@ func TestContainerRuntimeOptionsv1(t *testing.T) {
 
 	var (
 		image       Image
-		ctx, cancel = testContext()
+		ctx, cancel = testContext(t)
 		id          = t.Name()
 	)
 	defer cancel()
@@ -1218,7 +1210,7 @@ func TestContainerRuntimeOptionsv2(t *testing.T) {
 
 	var (
 		image       Image
-		ctx, cancel = testContext()
+		ctx, cancel = testContext(t)
 		id          = t.Name()
 	)
 	defer cancel()
@@ -1259,7 +1251,7 @@ func initContainerAndCheckChildrenDieOnKill(t *testing.T, opts ...oci.SpecOpts) 
 
 	var (
 		image       Image
-		ctx, cancel = testContext()
+		ctx, cancel = testContext(t)
 		id          = t.Name()
 	)
 	defer cancel()
@@ -1358,7 +1350,7 @@ func testUserNamespaces(t *testing.T, readonlyRootFS bool) {
 
 	var (
 		image       Image
-		ctx, cancel = testContext()
+		ctx, cancel = testContext(t)
 		id          = strings.Replace(t.Name(), "/", "-", -1)
 	)
 	defer cancel()
@@ -1447,7 +1439,7 @@ func TestTaskResize(t *testing.T) {
 
 	var (
 		image       Image
-		ctx, cancel = testContext()
+		ctx, cancel = testContext(t)
 		id          = t.Name()
 	)
 	defer cancel()
@@ -1482,7 +1474,7 @@ func TestTaskResize(t *testing.T) {
 func TestContainerImage(t *testing.T) {
 	t.Parallel()
 
-	ctx, cancel := testContext()
+	ctx, cancel := testContext(t)
 	defer cancel()
 	id := t.Name()
 
@@ -1515,7 +1507,7 @@ func TestContainerImage(t *testing.T) {
 func TestContainerNoImage(t *testing.T) {
 	t.Parallel()
 
-	ctx, cancel := testContext()
+	ctx, cancel := testContext(t)
 	defer cancel()
 	id := t.Name()
 
@@ -1543,7 +1535,7 @@ func TestContainerNoImage(t *testing.T) {
 func TestUIDNoGID(t *testing.T) {
 	t.Parallel()
 
-	ctx, cancel := testContext()
+	ctx, cancel := testContext(t)
 	defer cancel()
 	id := t.Name()
 
@@ -1586,7 +1578,7 @@ func TestBindLowPortNonRoot(t *testing.T) {
 
 	var (
 		image       Image
-		ctx, cancel = testContext()
+		ctx, cancel = testContext(t)
 		id          = t.Name()
 	)
 	defer cancel()
@@ -1642,7 +1634,7 @@ func TestBindLowPortNonOpt(t *testing.T) {
 
 	var (
 		image       Image
-		ctx, cancel = testContext()
+		ctx, cancel = testContext(t)
 		id          = t.Name()
 	)
 	defer cancel()
@@ -1703,7 +1695,7 @@ func TestContainerNoSTDIN(t *testing.T) {
 
 	var (
 		image       Image
-		ctx, cancel = testContext()
+		ctx, cancel = testContext(t)
 		id          = t.Name()
 	)
 	defer cancel()
@@ -1739,4 +1731,76 @@ func TestContainerNoSTDIN(t *testing.T) {
 	if code != 0 {
 		t.Errorf("expected status 0 from wait but received %d", code)
 	}
+}
+
+func TestShimOOMScore(t *testing.T) {
+	containerdPid := ctrd.cmd.Process.Pid
+	containerdScore, err := sys.GetOOMScoreAdj(containerdPid)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	client, err := newClient(t, address)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+
+	var (
+		image       Image
+		ctx, cancel = testContext(t)
+		id          = t.Name()
+	)
+	defer cancel()
+
+	path := "/containerd/oomshim"
+	cg, err := cgroups.New(cgroups.V1, cgroups.StaticPath(path), &specs.LinuxResources{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cg.Delete()
+
+	image, err = client.GetImage(ctx, testImage)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	container, err := client.NewContainer(ctx, id, WithNewSnapshot(id, image), WithNewSpec(oci.WithImageConfig(image), withProcessArgs("sleep", "30")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer container.Delete(ctx, WithSnapshotCleanup)
+
+	task, err := container.NewTask(ctx, empty(), WithShimCgroup(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer task.Delete(ctx)
+
+	statusC, err := task.Wait(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	processes, err := cg.Processes(cgroups.Devices, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expectedScore := containerdScore + 1
+	// find the shim's pid
+	for _, p := range processes {
+		score, err := sys.GetOOMScoreAdj(p.Pid)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if score != expectedScore {
+			t.Errorf("expected score %d but got %d for shim process", expectedScore, score)
+		}
+	}
+
+	if err := task.Kill(ctx, unix.SIGKILL); err != nil {
+		t.Fatal(err)
+	}
+
+	<-statusC
 }

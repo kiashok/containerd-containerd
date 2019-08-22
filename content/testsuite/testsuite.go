@@ -31,6 +31,7 @@ import (
 
 	"github.com/containerd/containerd/content"
 	"github.com/containerd/containerd/errdefs"
+	"github.com/containerd/containerd/log/logtest"
 	"github.com/containerd/containerd/pkg/testutil"
 	digest "github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
@@ -101,6 +102,7 @@ func Name(ctx context.Context) string {
 func makeTest(t *testing.T, name string, storeFn func(ctx context.Context, root string) (context.Context, content.Store, func() error, error), fn func(ctx context.Context, t *testing.T, cs content.Store)) func(t *testing.T) {
 	return func(t *testing.T) {
 		ctx := context.WithValue(context.Background(), nameKey{}, name)
+		ctx = logtest.WithT(ctx, t)
 
 		tmpDir, err := ioutil.TempDir("", "content-suite-"+name+"-")
 		if err != nil {
@@ -338,7 +340,7 @@ func checkRefNotAvailable(ctx context.Context, t *testing.T, cs content.Store, r
 
 	w, err := cs.Writer(ctx, content.WithRef(ref))
 	if err == nil {
-		w.Close()
+		defer w.Close()
 		t.Fatal("writer created with ref, expected to be in use")
 	}
 	if !errdefs.IsUnavailable(err) {
@@ -402,6 +404,7 @@ func checkCommitErrorState(ctx context.Context, t *testing.T, cs content.Store) 
 		}
 		t.Fatalf("Unexpected error: %+v", err)
 	}
+	w.Close()
 
 	w, err = cs.Writer(ctx, content.WithRef(ref))
 	if err != nil {
@@ -425,6 +428,7 @@ func checkCommitErrorState(ctx context.Context, t *testing.T, cs content.Store) 
 		t.Errorf("Unexpected error: %+v", err)
 	}
 
+	w.Close()
 	w, err = cs.Writer(ctx, content.WithRef(ref))
 	if err != nil {
 		t.Fatal(err)
@@ -440,6 +444,7 @@ func checkCommitErrorState(ctx context.Context, t *testing.T, cs content.Store) 
 		t.Errorf("Unexpected error: %+v", err)
 	}
 
+	w.Close()
 	w, err = cs.Writer(ctx, content.WithRef(ref))
 	if err != nil {
 		t.Fatal(err)
@@ -455,6 +460,7 @@ func checkCommitErrorState(ctx context.Context, t *testing.T, cs content.Store) 
 		t.Fatalf("Failed to commit: %+v", err)
 	}
 
+	w.Close()
 	// Create another writer with same reference
 	w, err = cs.Writer(ctx, content.WithRef(ref))
 	if err != nil {
@@ -481,6 +487,7 @@ func checkCommitErrorState(ctx context.Context, t *testing.T, cs content.Store) 
 		t.Fatalf("Unexpected error: %+v", err)
 	}
 
+	w.Close()
 	w, err = cs.Writer(ctx, content.WithRef(ref))
 	if err != nil {
 		t.Fatal(err)

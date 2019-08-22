@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/containerd/containerd/errdefs"
+	"github.com/containerd/containerd/log/logtest"
 	"github.com/containerd/containerd/mount"
 	"github.com/containerd/containerd/namespaces"
 	"github.com/containerd/containerd/pkg/testutil"
@@ -71,7 +72,7 @@ func makeTest(name string, snapshotterFn func(ctx context.Context, root string) 
 	return func(t *testing.T) {
 		t.Parallel()
 
-		ctx := context.Background()
+		ctx := logtest.WithT(context.Background(), t)
 		ctx = namespaces.WithNamespace(ctx, "testsuite")
 		// Make two directories: a snapshotter root and a play area for the tests:
 		//
@@ -149,11 +150,12 @@ func checkSnapshotterBasic(ctx context.Context, t *testing.T, snapshotter snapsh
 	if err := mount.All(mounts, preparing); err != nil {
 		t.Fatalf("failure reason: %+v", err)
 	}
-	defer testutil.Unmount(t, preparing)
 
 	if err := initialApplier.Apply(preparing); err != nil {
 		t.Fatalf("failure reason: %+v", err)
 	}
+	// unmount before commit
+	testutil.Unmount(t, preparing)
 
 	committed := filepath.Join(work, "committed")
 	if err := snapshotter.Commit(ctx, committed, preparing, opt); err != nil {
@@ -185,7 +187,6 @@ func checkSnapshotterBasic(ctx context.Context, t *testing.T, snapshotter snapsh
 	if err := mount.All(mounts, next); err != nil {
 		t.Fatalf("failure reason: %+v", err)
 	}
-	defer testutil.Unmount(t, next)
 
 	if err := fstest.CheckDirectoryEqualWithApplier(next, initialApplier); err != nil {
 		t.Fatalf("failure reason: %+v", err)
@@ -194,6 +195,8 @@ func checkSnapshotterBasic(ctx context.Context, t *testing.T, snapshotter snapsh
 	if err := diffApplier.Apply(next); err != nil {
 		t.Fatalf("failure reason: %+v", err)
 	}
+	// unmount before commit
+	testutil.Unmount(t, next)
 
 	ni, err := snapshotter.Stat(ctx, next)
 	if err != nil {
@@ -498,7 +501,6 @@ func checkRemoveIntermediateSnapshot(ctx context.Context, t *testing.T, snapshot
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer testutil.Unmount(t, base)
 
 	committedBase := filepath.Join(work, "committed-base")
 	if err = snapshotter.Commit(ctx, committedBase, base, opt); err != nil {
@@ -537,6 +539,7 @@ func checkRemoveIntermediateSnapshot(ctx context.Context, t *testing.T, snapshot
 	if err != nil {
 		t.Fatal(err)
 	}
+	testutil.Unmount(t, base)
 	err = snapshotter.Remove(ctx, committedBase)
 	if err != nil {
 		t.Fatal(err)

@@ -17,7 +17,7 @@
 ROOTDIR=$(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 
 # Base path used to install.
-DESTDIR=/usr/local
+DESTDIR ?= /usr/local
 
 # Used to populate variables in version package.
 VERSION=$(shell git describe --match 'v[0-9]*' --dirty='.m' --always)
@@ -111,7 +111,7 @@ GO_GCFLAGS=$(shell				\
 BINARIES=$(addprefix bin/,$(COMMANDS))
 
 # Flags passed to `go test`
-TESTFLAGS ?= -v $(TESTFLAGS_RACE)
+TESTFLAGS ?= $(TESTFLAGS_RACE)
 TESTFLAGS_PARALLEL ?= 8
 
 .PHONY: clean all AUTHORS build binaries test integration generate protos checkprotos coverage ci check help install uninstall vendor release mandir install-man
@@ -121,7 +121,7 @@ all: binaries
 
 check: proto-fmt ## run all linters
 	@echo "$(WHALE) $@"
-	gometalinter --config .gometalinter.json ./...
+	golangci-lint run
 
 ci: check binaries checkprotos coverage coverage-integration ## to be used by the CI
 
@@ -194,10 +194,6 @@ bin/containerd-shim-runc-v2: cmd/containerd-shim-runc-v2 FORCE # set !cgo and om
 	@echo "$(WHALE) bin/containerd-shim-runc-v2"
 	@CGO_ENABLED=0 go build ${GO_BUILD_FLAGS} -o bin/containerd-shim-runc-v2 ${SHIM_GO_LDFLAGS} ${GO_TAGS} ./cmd/containerd-shim-runc-v2
 
-bin/containerd-shim-runhcs-v1: cmd/containerd-shim-runhcs-v1 FORCE # set !cgo and omit pie for a static shim build: https://github.com/golang/go/issues/17789#issuecomment-258542220
-	@echo "$(WHALE) bin/containerd-shim-runhcs-v1${BINARY_SUFFIX}"
-	@CGO_ENABLED=0 go build ${GO_BUILD_FLAGS} -o bin/containerd-shim-runhcs-v1${BINARY_SUFFIX} ${SHIM_GO_LDFLAGS} ${GO_TAGS} ./cmd/containerd-shim-runhcs-v1
-
 binaries: $(BINARIES) ## build binaries
 	@echo "$(WHALE) $@"
 
@@ -226,10 +222,25 @@ release: $(BINARIES)
 	@install -d releases/$(RELEASE)/bin
 	@install $(BINARIES) releases/$(RELEASE)/bin
 	@cd releases/$(RELEASE) && tar -czf ../$(RELEASE).tar.gz *
+	@cd releases && sha256sum $(RELEASE).tar.gz >$(RELEASE).tar.gz.sha256sum
 
 clean: ## clean up binaries
 	@echo "$(WHALE) $@"
 	@rm -f $(BINARIES)
+
+clean-test: ## clean up debris from previously failed tests
+	@echo "$(WHALE) $@"
+	$(eval containers=$(shell find /run/containerd/runc -mindepth 2 -maxdepth 3  -type d -exec basename {} \;))
+	$(shell pidof containerd containerd-shim runc | xargs -r -n 1 kill -9)
+	@( for container in $(containers); do \
+	    grep $$container /proc/self/mountinfo | while read -r mountpoint; do \
+		umount $$(echo $$mountpoint | awk '{print $$5}'); \
+	    done; \
+	    find /sys/fs/cgroup -name $$container -print0 | xargs -r -0 rmdir; \
+	done )
+	@rm -rf /run/containerd/runc/*
+	@rm -rf /run/containerd/fifo/*
+	@rm -rf /run/containerd-test/*
 
 install: ## install binaries
 	@echo "$(WHALE) $@ $(BINARIES)"
