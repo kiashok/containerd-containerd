@@ -22,7 +22,7 @@ import (
 	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/pkg/errors"
 	"golang.org/x/net/context"
-	runtime "k8s.io/kubernetes/pkg/kubelet/apis/cri/runtime/v1alpha2"
+	runtime "k8s.io/cri-api/pkg/apis/runtime/v1alpha2"
 
 	"github.com/containerd/cri/pkg/store"
 	containerstore "github.com/containerd/cri/pkg/store/container"
@@ -60,6 +60,15 @@ func (c *criService) ContainerStatus(ctx context.Context, r *runtime.ContainerSt
 		}
 	}
 	status := toCRIContainerStatus(container, spec, imageRef)
+	if status.GetCreatedAt() == 0 {
+		// CRI doesn't allow CreatedAt == 0.
+		info, err := container.Container.Info(ctx)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to get CreatedAt in %q state", status.State)
+		}
+		status.CreatedAt = info.CreatedAt.UnixNano()
+	}
+
 	info, err := toCRIContainerInfo(ctx, container, r.GetVerbose())
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to get verbose container info")

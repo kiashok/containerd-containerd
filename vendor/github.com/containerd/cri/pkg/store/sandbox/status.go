@@ -21,25 +21,58 @@ import (
 	"time"
 )
 
+// The sandbox state machine in the CRI plugin:
+//                    +              +
+//                    |              |
+//                    | Create(Run)  | Load
+//                    |              |
+//      Start         |              |
+//     (failed)       |              |
+// +------------------+              +-----------+
+// |                  |              |           |
+// |                  |              |           |
+// |                  |              |           |
+// |                  | Start(Run)   |           |
+// |                  |              |           |
+// | PortForward +----v----+         |           |
+// |      +------+         |         |           |
+// |      |      |  READY  <---------+           |
+// |      +------>         |         |           |
+// |             +----+----+         |           |
+// |                  |              |           |
+// |                  | Stop/Exit    |           |
+// |                  |              |           |
+// |             +----v----+         |           |
+// |             |         <---------+      +----v----+
+// |             | NOTREADY|                |         |
+// |             |         <----------------+ UNKNOWN |
+// |             +----+----+       Stop     |         |
+// |                  |                     +---------+
+// |                  | Remove
+// |                  v
+// +-------------> DELETED
+
 // State is the sandbox state we use in containerd/cri.
-// It has unknown state defined.
+// It includes unknown, which is internal states not defined in CRI.
+// The state mapping from internal states to CRI states:
+// * ready -> ready
+// * not ready -> not ready
+// * unknown -> not ready
 type State uint32
 
 const (
-	// StateUnknown is unknown state of sandbox. Sandbox
-	// is in unknown state before its corresponding sandbox container
-	// is created. Sandbox in unknown state should be ignored by most
-	// functions, unless the caller needs to update sandbox state.
-	StateUnknown State = iota
 	// StateReady is ready state, it means sandbox container
 	// is running.
-	StateReady
+	StateReady = iota
 	// StateNotReady is notready state, it ONLY means sandbox
 	// container is not running.
 	// StopPodSandbox should still be called for NOTREADY sandbox to
 	// cleanup resources other than sandbox container, e.g. network namespace.
 	// This is an assumption made in CRI.
 	StateNotReady
+	// StateUnknown is unknown state. Sandbox only goes
+	// into unknown state when its status fails to be loaded.
+	StateUnknown
 )
 
 // Status is the status of a sandbox.

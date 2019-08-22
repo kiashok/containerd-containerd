@@ -21,7 +21,7 @@ import (
 
 	"github.com/containerd/containerd"
 	"github.com/docker/docker/pkg/truncindex"
-	runtime "k8s.io/kubernetes/pkg/kubelet/apis/cri/runtime/v1alpha2"
+	runtime "k8s.io/cri-api/pkg/apis/runtime/v1alpha2"
 
 	cio "github.com/containerd/cri/pkg/server/io"
 	"github.com/containerd/cri/pkg/store"
@@ -36,7 +36,8 @@ type Container struct {
 	Status StatusStorage
 	// Container is the containerd container client.
 	Container containerd.Container
-	// Container IO
+	// Container IO.
+	// IO could only be nil when the container is in unknown state.
 	IO *cio.ContainerIO
 	// StopCh is used to propagate the stop information of the container.
 	*store.StopCh

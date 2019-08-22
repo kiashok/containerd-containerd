@@ -840,6 +840,7 @@ file {
     java_outer_classname: "FieldMaskProto"
     java_multiple_files: true
     go_package: "google.golang.org/genproto/protobuf/field_mask;field_mask"
+    cc_enable_arenas: true
     objc_class_prefix: "GPB"
     csharp_namespace: "Google.Protobuf.WellKnownTypes"
   }
@@ -1771,6 +1772,34 @@ file {
       type: TYPE_INT64
       json_name: "size"
     }
+    field {
+      name: "annotations"
+      number: 5
+      label: LABEL_REPEATED
+      type: TYPE_MESSAGE
+      type_name: ".containerd.types.Descriptor.AnnotationsEntry"
+      json_name: "annotations"
+    }
+    nested_type {
+      name: "AnnotationsEntry"
+      field {
+        name: "key"
+        number: 1
+        label: LABEL_OPTIONAL
+        type: TYPE_STRING
+        json_name: "key"
+      }
+      field {
+        name: "value"
+        number: 2
+        label: LABEL_OPTIONAL
+        type: TYPE_STRING
+        json_name: "value"
+      }
+      options {
+        map_entry: true
+      }
+    }
   }
   options {
     go_package: "github.com/containerd/containerd/api/types;types"
@@ -1782,6 +1811,7 @@ file {
   name: "github.com/containerd/containerd/api/services/diff/v1/diff.proto"
   package: "containerd.services.diff.v1"
   dependency: "gogoproto/gogo.proto"
+  dependency: "google/protobuf/any.proto"
   dependency: "github.com/containerd/containerd/api/types/mount.proto"
   dependency: "github.com/containerd/containerd/api/types/descriptor.proto"
   message_type {
@@ -1801,6 +1831,35 @@ file {
       type: TYPE_MESSAGE
       type_name: ".containerd.types.Mount"
       json_name: "mounts"
+    }
+    field {
+      name: "payloads"
+      number: 3
+      label: LABEL_REPEATED
+      type: TYPE_MESSAGE
+      type_name: ".containerd.services.diff.v1.ApplyRequest.PayloadsEntry"
+      json_name: "payloads"
+    }
+    nested_type {
+      name: "PayloadsEntry"
+      field {
+        name: "key"
+        number: 1
+        label: LABEL_OPTIONAL
+        type: TYPE_STRING
+        json_name: "key"
+      }
+      field {
+        name: "value"
+        number: 2
+        label: LABEL_OPTIONAL
+        type: TYPE_MESSAGE
+        type_name: ".google.protobuf.Any"
+        json_name: "value"
+      }
+      options {
+        map_entry: true
+      }
     }
   }
   message_type {
@@ -2339,6 +2398,7 @@ file {
   package: "containerd.services.introspection.v1"
   dependency: "github.com/containerd/containerd/api/types/platform.proto"
   dependency: "google/rpc/status.proto"
+  dependency: "google/protobuf/empty.proto"
   dependency: "gogoproto/gogo.proto"
   message_type {
     name: "Plugin"
@@ -2442,6 +2502,19 @@ file {
       json_name: "plugins"
     }
   }
+  message_type {
+    name: "ServerResponse"
+    field {
+      name: "uuid"
+      number: 1
+      label: LABEL_OPTIONAL
+      type: TYPE_STRING
+      options {
+        65004: "UUID"
+      }
+      json_name: "uuid"
+    }
+  }
   service {
     name: "Introspection"
     method {
@@ -2449,11 +2522,16 @@ file {
       input_type: ".containerd.services.introspection.v1.PluginsRequest"
       output_type: ".containerd.services.introspection.v1.PluginsResponse"
     }
+    method {
+      name: "Server"
+      input_type: ".google.protobuf.Empty"
+      output_type: ".containerd.services.introspection.v1.ServerResponse"
+    }
   }
   options {
     go_package: "github.com/containerd/containerd/api/services/introspection/v1;introspection"
   }
-  weak_dependency: 2
+  weak_dependency: 3
   syntax: "proto3"
 }
 file {
@@ -2599,6 +2677,89 @@ file {
       json_name: "leases"
     }
   }
+  message_type {
+    name: "Resource"
+    field {
+      name: "id"
+      number: 1
+      label: LABEL_OPTIONAL
+      type: TYPE_STRING
+      json_name: "id"
+    }
+    field {
+      name: "type"
+      number: 2
+      label: LABEL_OPTIONAL
+      type: TYPE_STRING
+      json_name: "type"
+    }
+  }
+  message_type {
+    name: "AddResourceRequest"
+    field {
+      name: "id"
+      number: 1
+      label: LABEL_OPTIONAL
+      type: TYPE_STRING
+      json_name: "id"
+    }
+    field {
+      name: "resource"
+      number: 2
+      label: LABEL_OPTIONAL
+      type: TYPE_MESSAGE
+      type_name: ".containerd.services.leases.v1.Resource"
+      options {
+        65001: 0
+      }
+      json_name: "resource"
+    }
+  }
+  message_type {
+    name: "DeleteResourceRequest"
+    field {
+      name: "id"
+      number: 1
+      label: LABEL_OPTIONAL
+      type: TYPE_STRING
+      json_name: "id"
+    }
+    field {
+      name: "resource"
+      number: 2
+      label: LABEL_OPTIONAL
+      type: TYPE_MESSAGE
+      type_name: ".containerd.services.leases.v1.Resource"
+      options {
+        65001: 0
+      }
+      json_name: "resource"
+    }
+  }
+  message_type {
+    name: "ListResourcesRequest"
+    field {
+      name: "id"
+      number: 1
+      label: LABEL_OPTIONAL
+      type: TYPE_STRING
+      json_name: "id"
+    }
+  }
+  message_type {
+    name: "ListResourcesResponse"
+    field {
+      name: "resources"
+      number: 1
+      label: LABEL_REPEATED
+      type: TYPE_MESSAGE
+      type_name: ".containerd.services.leases.v1.Resource"
+      options {
+        65001: 0
+      }
+      json_name: "resources"
+    }
+  }
   service {
     name: "Leases"
     method {
@@ -2615,6 +2776,21 @@ file {
       name: "List"
       input_type: ".containerd.services.leases.v1.ListRequest"
       output_type: ".containerd.services.leases.v1.ListResponse"
+    }
+    method {
+      name: "AddResource"
+      input_type: ".containerd.services.leases.v1.AddResourceRequest"
+      output_type: ".google.protobuf.Empty"
+    }
+    method {
+      name: "DeleteResource"
+      input_type: ".containerd.services.leases.v1.DeleteResourceRequest"
+      output_type: ".google.protobuf.Empty"
+    }
+    method {
+      name: "ListResources"
+      input_type: ".containerd.services.leases.v1.ListResourcesRequest"
+      output_type: ".containerd.services.leases.v1.ListResourcesResponse"
     }
   }
   options {
@@ -4172,6 +4348,80 @@ file {
     go_package: "github.com/containerd/containerd/api/services/tasks/v1;tasks"
   }
   weak_dependency: 2
+  syntax: "proto3"
+}
+file {
+  name: "github.com/containerd/containerd/api/services/ttrpc/events/v1/events.proto"
+  package: "containerd.services.events.ttrpc.v1"
+  dependency: "github.com/containerd/containerd/protobuf/plugin/fieldpath.proto"
+  dependency: "gogoproto/gogo.proto"
+  dependency: "google/protobuf/any.proto"
+  dependency: "google/protobuf/empty.proto"
+  dependency: "google/protobuf/timestamp.proto"
+  message_type {
+    name: "ForwardRequest"
+    field {
+      name: "envelope"
+      number: 1
+      label: LABEL_OPTIONAL
+      type: TYPE_MESSAGE
+      type_name: ".containerd.services.events.ttrpc.v1.Envelope"
+      json_name: "envelope"
+    }
+  }
+  message_type {
+    name: "Envelope"
+    field {
+      name: "timestamp"
+      number: 1
+      label: LABEL_OPTIONAL
+      type: TYPE_MESSAGE
+      type_name: ".google.protobuf.Timestamp"
+      options {
+        65001: 0
+        65010: 1
+      }
+      json_name: "timestamp"
+    }
+    field {
+      name: "namespace"
+      number: 2
+      label: LABEL_OPTIONAL
+      type: TYPE_STRING
+      json_name: "namespace"
+    }
+    field {
+      name: "topic"
+      number: 3
+      label: LABEL_OPTIONAL
+      type: TYPE_STRING
+      json_name: "topic"
+    }
+    field {
+      name: "event"
+      number: 4
+      label: LABEL_OPTIONAL
+      type: TYPE_MESSAGE
+      type_name: ".google.protobuf.Any"
+      json_name: "event"
+    }
+    options {
+      64400: 1
+    }
+  }
+  service {
+    name: "Events"
+    method {
+      name: "Forward"
+      input_type: ".containerd.services.events.ttrpc.v1.ForwardRequest"
+      output_type: ".google.protobuf.Empty"
+    }
+  }
+  options {
+    go_package: "github.com/containerd/containerd/api/services/ttrpc/events/v1;events"
+  }
+  weak_dependency: 0
+  weak_dependency: 1
   syntax: "proto3"
 }
 file {

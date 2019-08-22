@@ -17,15 +17,18 @@
 package containerd
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
 
 	"io/ioutil"
 	"math/rand"
+	"reflect"
 	"runtime"
 	"testing"
 
+	"github.com/containerd/containerd/archive/compression"
 	"github.com/containerd/containerd/archive/tartest"
 	"github.com/containerd/containerd/images"
 	"github.com/containerd/containerd/images/archive"
@@ -34,14 +37,14 @@ import (
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
-// TestOCIExportAndImport exports testImage as a tar stream,
+// TestExportAndImport exports testImage as a tar stream,
 // and import the tar stream as a new image.
-func TestOCIExportAndImport(t *testing.T) {
+func TestExportAndImport(t *testing.T) {
 	// TODO: support windows
 	if testing.Short() || runtime.GOOS == "windows" {
 		t.Skip()
 	}
-	ctx, cancel := testContext()
+	ctx, cancel := testContext(t)
 	defer cancel()
 
 	client, err := New(address)
@@ -50,12 +53,13 @@ func TestOCIExportAndImport(t *testing.T) {
 	}
 	defer client.Close()
 
-	pulled, err := client.Fetch(ctx, testImage)
+	_, err = client.Fetch(ctx, testImage)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	exported, err := client.Export(ctx, pulled.Target)
+	wb := bytes.NewBuffer(nil)
+	err = client.Export(ctx, wb, archive.WithAllPlatforms(), archive.WithImage(client.ImageService(), testImage))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,12 +67,15 @@ func TestOCIExportAndImport(t *testing.T) {
 	opts := []ImportOpt{
 		WithImageRefTranslator(archive.AddRefPrefix("foo/bar")),
 	}
-	imgrecs, err := client.Import(ctx, exported, opts...)
+	imgrecs, err := client.Import(ctx, bytes.NewReader(wb.Bytes()), opts...)
 	if err != nil {
 		t.Fatalf("Import failed: %+v", err)
 	}
 
 	for _, imgrec := range imgrecs {
+		if imgrec.Name == testImage {
+			continue
+		}
 		err = client.ImageService().Delete(ctx, imgrec.Name)
 		if err != nil {
 			t.Fatal(err)
@@ -77,7 +84,7 @@ func TestOCIExportAndImport(t *testing.T) {
 }
 
 func TestImport(t *testing.T) {
-	ctx, cancel := testContext()
+	ctx, cancel := testContext(t)
 	defer cancel()
 
 	client, err := New(address)
@@ -94,11 +101,11 @@ func TestImport(t *testing.T) {
 
 	c1, d2 := createConfig()
 
-	m1, d3 := createManifest(c1, [][]byte{b1})
+	m1, d3, expManifest := createManifest(c1, [][]byte{b1})
 
 	provider := client.ContentStore()
 
-	checkManifest := func(ctx context.Context, t *testing.T, d ocispec.Descriptor) {
+	checkManifest := func(ctx context.Context, t *testing.T, d ocispec.Descriptor, expManifest *ocispec.Manifest) {
 		m, err := images.Manifest(ctx, provider, d, nil)
 		if err != nil {
 			t.Fatalf("unable to read target blob: %+v", err)
@@ -114,6 +121,15 @@ func TestImport(t *testing.T) {
 
 		if m.Layers[0].Digest != d1 {
 			t.Fatalf("unexpected layer hash %s, expected %s", m.Layers[0].Digest, d1)
+		}
+
+		if expManifest != nil {
+			if !reflect.DeepEqual(m.Layers, expManifest.Layers) {
+				t.Fatalf("DeepEqual on Layers failed: %v vs. %v", m.Layers, expManifest.Layers)
+			}
+			if !reflect.DeepEqual(m.Config, expManifest.Config) {
+				t.Fatalf("DeepEqual on Config failed: %v vs. %v", m.Config, expManifest.Config)
+			}
 		}
 	}
 
@@ -154,7 +170,7 @@ func TestImport(t *testing.T) {
 				}
 
 				checkImages(t, imgs[0].Target.Digest, imgs, names...)
-				checkManifest(ctx, t, imgs[0].Target)
+				checkManifest(ctx, t, imgs[0].Target, nil)
 			},
 		},
 		{
@@ -181,7 +197,7 @@ func TestImport(t *testing.T) {
 				}
 
 				checkImages(t, d3, imgs, names...)
-				checkManifest(ctx, t, imgs[0].Target)
+				checkManifest(ctx, t, imgs[0].Target, expManifest)
 			},
 		},
 		{
@@ -202,14 +218,14 @@ func TestImport(t *testing.T) {
 				}
 
 				checkImages(t, d3, imgs, names...)
-				checkManifest(ctx, t, imgs[0].Target)
+				checkManifest(ctx, t, imgs[0].Target, expManifest)
 			},
 			Opts: []ImportOpt{
 				WithImageRefTranslator(archive.AddRefPrefix("localhost:5000/myimage")),
 			},
 		},
 		{
-			Name: "OCIPrefixName",
+			Name: "OCIPrefixName2",
 			Writer: tartest.TarAll(
 				tc.Dir("blobs", 0755),
 				tc.Dir("blobs/sha256", 0755),
@@ -226,7 +242,7 @@ func TestImport(t *testing.T) {
 				}
 
 				checkImages(t, d3, imgs, names...)
-				checkManifest(ctx, t, imgs[0].Target)
+				checkManifest(ctx, t, imgs[0].Target, expManifest)
 			},
 			Opts: []ImportOpt{
 				WithImageRefTranslator(archive.FilterRefPrefix("localhost:5000/myimage")),
@@ -274,6 +290,16 @@ func createContent(size int64, seed int64) ([]byte, digest.Digest) {
 	if err != nil {
 		panic(err)
 	}
+	wb := bytes.NewBuffer(nil)
+	cw, err := compression.CompressStream(wb, compression.Gzip)
+	if err != nil {
+		panic(err)
+	}
+
+	if _, err := cw.Write(b); err != nil {
+		panic(err)
+	}
+	b = wb.Bytes()
 	return b, digest.FromBytes(b)
 }
 
@@ -288,7 +314,7 @@ func createConfig() ([]byte, digest.Digest) {
 	return b, digest.FromBytes(b)
 }
 
-func createManifest(config []byte, layers [][]byte) ([]byte, digest.Digest) {
+func createManifest(config []byte, layers [][]byte) ([]byte, digest.Digest, *ocispec.Manifest) {
 	manifest := ocispec.Manifest{
 		Versioned: specs.Versioned{
 			SchemaVersion: 2,
@@ -297,6 +323,9 @@ func createManifest(config []byte, layers [][]byte) ([]byte, digest.Digest) {
 			MediaType: ocispec.MediaTypeImageConfig,
 			Digest:    digest.FromBytes(config),
 			Size:      int64(len(config)),
+			Annotations: map[string]string{
+				"ocispec": "manifest.config.descriptor",
+			},
 		},
 	}
 	for _, l := range layers {
@@ -304,12 +333,15 @@ func createManifest(config []byte, layers [][]byte) ([]byte, digest.Digest) {
 			MediaType: ocispec.MediaTypeImageLayer,
 			Digest:    digest.FromBytes(l),
 			Size:      int64(len(l)),
+			Annotations: map[string]string{
+				"ocispec": "manifest.layers.descriptor",
+			},
 		})
 	}
 
 	b, _ := json.Marshal(manifest)
 
-	return b, digest.FromBytes(b)
+	return b, digest.FromBytes(b), &manifest
 }
 
 func createIndex(manifest []byte, tags ...string) []byte {

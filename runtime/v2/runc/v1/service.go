@@ -33,18 +33,21 @@ import (
 	eventstypes "github.com/containerd/containerd/api/events"
 	"github.com/containerd/containerd/api/types/task"
 	"github.com/containerd/containerd/errdefs"
-	"github.com/containerd/containerd/events"
 	"github.com/containerd/containerd/log"
 	"github.com/containerd/containerd/mount"
 	"github.com/containerd/containerd/namespaces"
-	rproc "github.com/containerd/containerd/runtime/proc"
-	"github.com/containerd/containerd/runtime/v1/linux/proc"
+	"github.com/containerd/containerd/pkg/oom"
+	"github.com/containerd/containerd/pkg/process"
+	"github.com/containerd/containerd/pkg/stdio"
 	"github.com/containerd/containerd/runtime/v2/runc"
 	"github.com/containerd/containerd/runtime/v2/runc/options"
 	"github.com/containerd/containerd/runtime/v2/shim"
 	taskAPI "github.com/containerd/containerd/runtime/v2/task"
+	"github.com/containerd/containerd/sys/reaper"
 	runcC "github.com/containerd/go-runc"
 	"github.com/containerd/typeurl"
+	"github.com/gogo/protobuf/proto"
+	"github.com/gogo/protobuf/types"
 	ptypes "github.com/gogo/protobuf/types"
 	specs "github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/pkg/errors"
@@ -58,28 +61,27 @@ var (
 )
 
 // New returns a new shim service that can be used via GRPC
-func New(ctx context.Context, id string, publisher events.Publisher) (shim.Shim, error) {
-	ep, err := runc.NewOOMEpoller(publisher)
+func New(ctx context.Context, id string, publisher shim.Publisher, shutdown func()) (shim.Shim, error) {
+	ep, err := oom.New(publisher)
 	if err != nil {
 		return nil, err
 	}
-	ctx, cancel := context.WithCancel(ctx)
 	go ep.Run(ctx)
 	s := &service{
 		id:      id,
 		context: ctx,
 		events:  make(chan interface{}, 128),
-		ec:      shim.Default.Subscribe(),
+		ec:      reaper.Default.Subscribe(),
 		ep:      ep,
-		cancel:  cancel,
+		cancel:  shutdown,
 	}
 	go s.processExits()
-	runcC.Monitor = shim.Default
+	runcC.Monitor = reaper.Default
 	if err := s.initPlatform(); err != nil {
-		cancel()
+		shutdown()
 		return nil, errors.Wrap(err, "failed to initialized platform behavior")
 	}
-	go s.forward(publisher)
+	go s.forward(ctx, publisher)
 	return s, nil
 }
 
@@ -90,9 +92,9 @@ type service struct {
 
 	context  context.Context
 	events   chan interface{}
-	platform rproc.Platform
+	platform stdio.Platform
 	ec       chan runcC.Exit
-	ep       *runc.Epoller
+	ep       *oom.Epoller
 
 	id        string
 	container *runc.Container
@@ -100,7 +102,7 @@ type service struct {
 	cancel func()
 }
 
-func newCommand(ctx context.Context, id, containerdBinary, containerdAddress string) (*exec.Cmd, error) {
+func newCommand(ctx context.Context, id, containerdBinary, containerdAddress, containerdTTRPCAddress string) (*exec.Cmd, error) {
 	ns, err := namespaces.NamespaceRequired(ctx)
 	if err != nil {
 		return nil, err
@@ -117,7 +119,7 @@ func newCommand(ctx context.Context, id, containerdBinary, containerdAddress str
 		"-namespace", ns,
 		"-id", id,
 		"-address", containerdAddress,
-		"-publish-binary", containerdBinary,
+		"-ttrpc-address", containerdTTRPCAddress,
 	}
 	cmd := exec.Command(self, args...)
 	cmd.Dir = cwd
@@ -128,8 +130,8 @@ func newCommand(ctx context.Context, id, containerdBinary, containerdAddress str
 	return cmd, nil
 }
 
-func (s *service) StartShim(ctx context.Context, id, containerdBinary, containerdAddress string) (string, error) {
-	cmd, err := newCommand(ctx, id, containerdBinary, containerdAddress)
+func (s *service) StartShim(ctx context.Context, id, containerdBinary, containerdAddress, containerdTTRPCAddress string) (string, error) {
+	cmd, err := newCommand(ctx, id, containerdBinary, containerdAddress, containerdTTRPCAddress)
 	if err != nil {
 		return "", err
 	}
@@ -166,8 +168,33 @@ func (s *service) StartShim(ctx context.Context, id, containerdBinary, container
 	if err := shim.WriteAddress("address", address); err != nil {
 		return "", err
 	}
-	if err := shim.SetScore(cmd.Process.Pid); err != nil {
-		return "", errors.Wrap(err, "failed to set OOM Score on shim")
+	if data, err := ioutil.ReadAll(os.Stdin); err == nil {
+		if len(data) > 0 {
+			var any types.Any
+			if err := proto.Unmarshal(data, &any); err != nil {
+				return "", err
+			}
+			v, err := typeurl.UnmarshalAny(&any)
+			if err != nil {
+				return "", err
+			}
+			if opts, ok := v.(*options.Options); ok {
+				if opts.ShimCgroup != "" {
+					cg, err := cgroups.Load(cgroups.V1, cgroups.StaticPath(opts.ShimCgroup))
+					if err != nil {
+						return "", errors.Wrapf(err, "failed to load cgroup %s", opts.ShimCgroup)
+					}
+					if err := cg.Add(cgroups.Process{
+						Pid: cmd.Process.Pid,
+					}); err != nil {
+						return "", errors.Wrapf(err, "failed to join cgroup %s", opts.ShimCgroup)
+					}
+				}
+			}
+		}
+	}
+	if err := shim.AdjustOOMScore(cmd.Process.Pid); err != nil {
+		return "", errors.Wrap(err, "failed to adjust OOM score for shim")
 	}
 	return address, nil
 }
@@ -185,7 +212,7 @@ func (s *service) Cleanup(ctx context.Context) (*taskAPI.DeleteResponse, error) 
 	if err != nil {
 		return nil, err
 	}
-	r := proc.NewRunc(proc.RuncRoot, path, ns, runtime, "", false)
+	r := process.NewRunc(process.RuncRoot, path, ns, runtime, "", false)
 	if err := r.Delete(ctx, s.id, &runcC.DeleteOpts{
 		Force: true,
 	}); err != nil {
@@ -302,11 +329,13 @@ func (s *service) Exec(ctx context.Context, r *taskAPI.ExecProcessRequest) (*pty
 	if err != nil {
 		return nil, err
 	}
-	if container.ProcessExists(r.ExecID) {
+	ok, cancel := container.ReserveProcess(r.ExecID)
+	if !ok {
 		return nil, errdefs.ToGRPCf(errdefs.ErrAlreadyExists, "id %s", r.ExecID)
 	}
 	process, err := container.Exec(ctx, r)
 	if err != nil {
+		cancel()
 		return nil, errdefs.ToGRPC(err)
 	}
 
@@ -377,7 +406,7 @@ func (s *service) Pause(ctx context.Context, r *taskAPI.PauseRequest) (*ptypes.E
 		return nil, errdefs.ToGRPC(err)
 	}
 	s.send(&eventstypes.TaskPaused{
-		container.ID,
+		ContainerID: container.ID,
 	})
 	return empty, nil
 }
@@ -392,7 +421,7 @@ func (s *service) Resume(ctx context.Context, r *taskAPI.ResumeRequest) (*ptypes
 		return nil, errdefs.ToGRPC(err)
 	}
 	s.send(&eventstypes.TaskResumed{
-		container.ID,
+		ContainerID: container.ID,
 	})
 	return empty, nil
 }
@@ -512,7 +541,7 @@ func (s *service) Connect(ctx context.Context, r *taskAPI.ConnectRequest) (*task
 
 func (s *service) Shutdown(ctx context.Context, r *taskAPI.ShutdownRequest) (*ptypes.Empty, error) {
 	s.cancel()
-	os.Exit(0)
+	close(s.events)
 	return empty, nil
 }
 
@@ -564,7 +593,7 @@ func (s *service) checkProcesses(e runcC.Exit) {
 	for _, p := range container.All() {
 		if p.Pid() == e.Pid {
 			if shouldKillAll {
-				if ip, ok := p.(*proc.Init); ok {
+				if ip, ok := p.(*process.Init); ok {
 					// Ensure all children are killed
 					if err := ip.KillAll(s.context); err != nil {
 						logrus.WithError(err).WithField("id", ip.ID()).
@@ -609,7 +638,7 @@ func (s *service) getContainerPids(ctx context.Context, id string) ([]uint32, er
 	if err != nil {
 		return nil, errdefs.ToGRPC(err)
 	}
-	ps, err := p.(*proc.Init).Runtime().Ps(ctx, id)
+	ps, err := p.(*process.Init).Runtime().Ps(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -620,15 +649,18 @@ func (s *service) getContainerPids(ctx context.Context, id string) ([]uint32, er
 	return pids, nil
 }
 
-func (s *service) forward(publisher events.Publisher) {
+func (s *service) forward(ctx context.Context, publisher shim.Publisher) {
+	ns, _ := namespaces.Namespace(ctx)
+	ctx = namespaces.WithNamespace(context.Background(), ns)
 	for e := range s.events {
-		ctx, cancel := context.WithTimeout(s.context, 5*time.Second)
+		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		err := publisher.Publish(ctx, runc.GetTopic(e), e)
 		cancel()
 		if err != nil {
 			logrus.WithError(err).Error("post event")
 		}
 	}
+	publisher.Close()
 }
 
 func (s *service) getContainer() (*runc.Container, error) {
@@ -641,7 +673,7 @@ func (s *service) getContainer() (*runc.Container, error) {
 	return container, nil
 }
 
-func (s *service) getProcess(execID string) (rproc.Process, error) {
+func (s *service) getProcess(execID string) (process.Process, error) {
 	container, err := s.getContainer()
 	if err != nil {
 		return nil, err

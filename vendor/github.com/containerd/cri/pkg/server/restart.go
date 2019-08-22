@@ -26,14 +26,15 @@ import (
 	containerdio "github.com/containerd/containerd/cio"
 	"github.com/containerd/containerd/errdefs"
 	containerdimages "github.com/containerd/containerd/images"
+	"github.com/containerd/containerd/log"
 	"github.com/containerd/containerd/platforms"
 	"github.com/containerd/typeurl"
 	"github.com/docker/docker/pkg/system"
 	"github.com/pkg/errors"
-	"github.com/sirupsen/logrus"
 	"golang.org/x/net/context"
-	runtime "k8s.io/kubernetes/pkg/kubelet/apis/cri/runtime/v1alpha2"
+	runtime "k8s.io/cri-api/pkg/apis/runtime/v1alpha2"
 
+	ctrdutil "github.com/containerd/cri/pkg/containerd/util"
 	"github.com/containerd/cri/pkg/netns"
 	cio "github.com/containerd/cri/pkg/server/io"
 	containerstore "github.com/containerd/cri/pkg/store/container"
@@ -57,12 +58,12 @@ func (c *criService) recover(ctx context.Context) error {
 		return errors.Wrap(err, "failed to list sandbox containers")
 	}
 	for _, sandbox := range sandboxes {
-		sb, err := loadSandbox(ctx, sandbox)
+		sb, err := c.loadSandbox(ctx, sandbox)
 		if err != nil {
-			logrus.WithError(err).Errorf("Failed to load sandbox %q", sandbox.ID())
+			log.G(ctx).WithError(err).Errorf("Failed to load sandbox %q", sandbox.ID())
 			continue
 		}
-		logrus.Debugf("Loaded sandbox %+v", sb)
+		log.G(ctx).Debugf("Loaded sandbox %+v", sb)
 		if err := c.sandboxStore.Add(sb); err != nil {
 			return errors.Wrapf(err, "failed to add sandbox %q to store", sandbox.ID())
 		}
@@ -79,10 +80,10 @@ func (c *criService) recover(ctx context.Context) error {
 	for _, container := range containers {
 		cntr, err := c.loadContainer(ctx, container)
 		if err != nil {
-			logrus.WithError(err).Errorf("Failed to load container %q", container.ID())
+			log.G(ctx).WithError(err).Errorf("Failed to load container %q", container.ID())
 			continue
 		}
-		logrus.Debugf("Loaded container %+v", cntr)
+		log.G(ctx).Debugf("Loaded container %+v", cntr)
 		if err := c.containerStore.Add(cntr); err != nil {
 			return errors.Wrapf(err, "failed to add container %q to store", container.ID())
 		}
@@ -129,7 +130,7 @@ func (c *criService) recover(ctx context.Context) error {
 			errMsg: "failed to cleanup orphaned volatile container directories",
 		},
 	} {
-		if err := cleanupOrphanedIDDirs(cleanup.cntrs, cleanup.base); err != nil {
+		if err := cleanupOrphanedIDDirs(ctx, cleanup.cntrs, cleanup.base); err != nil {
 			return errors.Wrap(err, cleanup.errMsg)
 		}
 	}
@@ -175,146 +176,152 @@ func (c *criService) loadContainer(ctx context.Context, cntr containerd.Containe
 	// Load status from checkpoint.
 	status, err := containerstore.LoadStatus(containerDir, id)
 	if err != nil {
-		logrus.WithError(err).Warnf("Failed to load container status for %q", id)
+		log.G(ctx).WithError(err).Warnf("Failed to load container status for %q", id)
 		status = unknownContainerStatus()
 	}
 
-	// Load up-to-date status from containerd.
 	var containerIO *cio.ContainerIO
-	t, err := cntr.Task(ctx, func(fifos *containerdio.FIFOSet) (_ containerdio.IO, err error) {
-		stdoutWC, stderrWC, err := c.createContainerLoggers(meta.LogPath, meta.Config.GetTty())
-		if err != nil {
-			return nil, err
-		}
-		defer func() {
+	err = func() error {
+		// Load up-to-date status from containerd.
+		t, err := cntr.Task(ctx, func(fifos *containerdio.FIFOSet) (_ containerdio.IO, err error) {
+			stdoutWC, stderrWC, err := c.createContainerLoggers(meta.LogPath, meta.Config.GetTty())
 			if err != nil {
-				if stdoutWC != nil {
-					stdoutWC.Close()
-				}
-				if stderrWC != nil {
-					stderrWC.Close()
-				}
+				return nil, err
 			}
-		}()
-		containerIO, err = cio.NewContainerIO(id,
-			cio.WithFIFOs(fifos),
-		)
-		if err != nil {
-			return nil, err
-		}
-		containerIO.AddOutput("log", stdoutWC, stderrWC)
-		containerIO.Pipe()
-		return containerIO, nil
-	})
-	if err != nil && !errdefs.IsNotFound(err) {
-		return container, errors.Wrap(err, "failed to load task")
-	}
-	var s containerd.Status
-	var notFound bool
-	if errdefs.IsNotFound(err) {
-		// Task is not found.
-		notFound = true
-	} else {
-		// Task is found. Get task status.
-		s, err = t.Status(ctx)
-		if err != nil {
-			// It's still possible that task is deleted during this window.
-			if !errdefs.IsNotFound(err) {
-				return container, errors.Wrap(err, "failed to get task status")
-			}
-			notFound = true
-		}
-	}
-	if notFound {
-		// Task is not created or has been deleted, use the checkpointed status
-		// to generate container status.
-		switch status.State() {
-		case runtime.ContainerState_CONTAINER_CREATED:
-			// NOTE: Another possibility is that we've tried to start the container, but
-			// containerd got restarted during that. In that case, we still
-			// treat the container as `CREATED`.
+			defer func() {
+				if err != nil {
+					if stdoutWC != nil {
+						stdoutWC.Close()
+					}
+					if stderrWC != nil {
+						stderrWC.Close()
+					}
+				}
+			}()
 			containerIO, err = cio.NewContainerIO(id,
-				cio.WithNewFIFOs(volatileContainerDir, meta.Config.GetTty(), meta.Config.GetStdin()),
+				cio.WithFIFOs(fifos),
 			)
 			if err != nil {
-				return container, errors.Wrap(err, "failed to create container io")
+				return nil, err
 			}
-		case runtime.ContainerState_CONTAINER_RUNNING:
-			// Container was in running state, but its task has been deleted,
-			// set unknown exited state. Container io is not needed in this case.
-			status.FinishedAt = time.Now().UnixNano()
-			status.ExitCode = unknownExitCode
-			status.Reason = unknownExitReason
-		default:
-			// Container is in exited/unknown state, return the status as it is.
+			containerIO.AddOutput("log", stdoutWC, stderrWC)
+			containerIO.Pipe()
+			return containerIO, nil
+		})
+		if err != nil && !errdefs.IsNotFound(err) {
+			return errors.Wrap(err, "failed to load task")
 		}
-	} else {
-		// Task status is found. Update container status based on the up-to-date task status.
-		switch s.Status {
-		case containerd.Created:
-			// Task has been created, but not started yet. This could only happen if containerd
-			// gets restarted during container start.
-			// Container must be in `CREATED` state.
-			if _, err := t.Delete(ctx, containerd.WithProcessKill); err != nil && !errdefs.IsNotFound(err) {
-				return container, errors.Wrap(err, "failed to delete task")
+		var s containerd.Status
+		var notFound bool
+		if errdefs.IsNotFound(err) {
+			// Task is not found.
+			notFound = true
+		} else {
+			// Task is found. Get task status.
+			s, err = t.Status(ctx)
+			if err != nil {
+				// It's still possible that task is deleted during this window.
+				if !errdefs.IsNotFound(err) {
+					return errors.Wrap(err, "failed to get task status")
+				}
+				notFound = true
 			}
-			if status.State() != runtime.ContainerState_CONTAINER_CREATED {
-				return container, errors.Errorf("unexpected container state for created task: %q", status.State())
-			}
-		case containerd.Running:
-			// Task is running. Container must be in `RUNNING` state, based on our assuption that
-			// "task should not be started when containerd is down".
+		}
+		if notFound {
+			// Task is not created or has been deleted, use the checkpointed status
+			// to generate container status.
 			switch status.State() {
-			case runtime.ContainerState_CONTAINER_EXITED:
-				return container, errors.Errorf("unexpected container state for running task: %q", status.State())
+			case runtime.ContainerState_CONTAINER_CREATED:
+				// NOTE: Another possibility is that we've tried to start the container, but
+				// containerd got restarted during that. In that case, we still
+				// treat the container as `CREATED`.
+				containerIO, err = cio.NewContainerIO(id,
+					cio.WithNewFIFOs(volatileContainerDir, meta.Config.GetTty(), meta.Config.GetStdin()),
+				)
+				if err != nil {
+					return errors.Wrap(err, "failed to create container io")
+				}
 			case runtime.ContainerState_CONTAINER_RUNNING:
+				// Container was in running state, but its task has been deleted,
+				// set unknown exited state. Container io is not needed in this case.
+				status.FinishedAt = time.Now().UnixNano()
+				status.ExitCode = unknownExitCode
+				status.Reason = unknownExitReason
 			default:
-				// This may happen if containerd gets restarted after task is started, but
-				// before status is checkpointed.
-				status.StartedAt = time.Now().UnixNano()
-				status.Pid = t.Pid()
+				// Container is in exited/unknown state, return the status as it is.
 			}
-		case containerd.Stopped:
-			// Task is stopped. Updata status and delete the task.
-			if _, err := t.Delete(ctx, containerd.WithProcessKill); err != nil && !errdefs.IsNotFound(err) {
-				return container, errors.Wrap(err, "failed to delete task")
+		} else {
+			// Task status is found. Update container status based on the up-to-date task status.
+			switch s.Status {
+			case containerd.Created:
+				// Task has been created, but not started yet. This could only happen if containerd
+				// gets restarted during container start.
+				// Container must be in `CREATED` state.
+				if _, err := t.Delete(ctx, containerd.WithProcessKill); err != nil && !errdefs.IsNotFound(err) {
+					return errors.Wrap(err, "failed to delete task")
+				}
+				if status.State() != runtime.ContainerState_CONTAINER_CREATED {
+					return errors.Errorf("unexpected container state for created task: %q", status.State())
+				}
+			case containerd.Running:
+				// Task is running. Container must be in `RUNNING` state, based on our assuption that
+				// "task should not be started when containerd is down".
+				switch status.State() {
+				case runtime.ContainerState_CONTAINER_EXITED:
+					return errors.Errorf("unexpected container state for running task: %q", status.State())
+				case runtime.ContainerState_CONTAINER_RUNNING:
+				default:
+					// This may happen if containerd gets restarted after task is started, but
+					// before status is checkpointed.
+					status.StartedAt = time.Now().UnixNano()
+					status.Pid = t.Pid()
+				}
+				// Wait for the task for exit monitor.
+				// wait is a long running background request, no timeout needed.
+				exitCh, err := t.Wait(ctrdutil.NamespacedContext())
+				if err != nil {
+					if !errdefs.IsNotFound(err) {
+						return errors.Wrap(err, "failed to wait for task")
+					}
+					// Container was in running state, but its task has been deleted,
+					// set unknown exited state.
+					status.FinishedAt = time.Now().UnixNano()
+					status.ExitCode = unknownExitCode
+					status.Reason = unknownExitReason
+				} else {
+					// Start exit monitor.
+					c.eventMonitor.startExitMonitor(context.Background(), id, status.Pid, exitCh)
+				}
+			case containerd.Stopped:
+				// Task is stopped. Updata status and delete the task.
+				if _, err := t.Delete(ctx, containerd.WithProcessKill); err != nil && !errdefs.IsNotFound(err) {
+					return errors.Wrap(err, "failed to delete task")
+				}
+				status.FinishedAt = s.ExitTime.UnixNano()
+				status.ExitCode = int32(s.ExitStatus)
+			default:
+				return errors.Errorf("unexpected task status %q", s.Status)
 			}
-			status.FinishedAt = s.ExitTime.UnixNano()
-			status.ExitCode = int32(s.ExitStatus)
-		default:
-			return container, errors.Errorf("unexpected task status %q", s.Status)
 		}
+		return nil
+	}()
+	if err != nil {
+		log.G(ctx).WithError(err).Errorf("Failed to load container status for %q", id)
+		status = unknownContainerStatus()
 	}
 	opts := []containerstore.Opts{
 		containerstore.WithStatus(status, containerDir),
 		containerstore.WithContainer(cntr),
 	}
+	// containerIO could be nil for container in unknown state.
 	if containerIO != nil {
 		opts = append(opts, containerstore.WithContainerIO(containerIO))
 	}
 	return containerstore.NewContainer(*meta, opts...)
 }
 
-const (
-	// unknownExitCode is the exit code when exit reason is unknown.
-	unknownExitCode = 255
-	// unknownExitReason is the exit reason when exit reason is unknown.
-	unknownExitReason = "Unknown"
-)
-
-// unknownContainerStatus returns the default container status when its status is unknown.
-func unknownContainerStatus() containerstore.Status {
-	return containerstore.Status{
-		CreatedAt:  0,
-		StartedAt:  0,
-		FinishedAt: 0,
-		ExitCode:   unknownExitCode,
-		Reason:     unknownExitReason,
-	}
-}
-
 // loadSandbox loads sandbox from containerd.
-func loadSandbox(ctx context.Context, cntr containerd.Container) (sandboxstore.Sandbox, error) {
+func (c *criService) loadSandbox(ctx context.Context, cntr containerd.Container) (sandboxstore.Sandbox, error) {
 	ctx, cancel := context.WithTimeout(ctx, loadContainerTimeout)
 	defer cancel()
 	var sandbox sandboxstore.Sandbox
@@ -333,61 +340,70 @@ func loadSandbox(ctx context.Context, cntr containerd.Container) (sandboxstore.S
 	}
 	meta := data.(*sandboxstore.Metadata)
 
-	// Load sandbox created timestamp.
-	info, err := cntr.Info(ctx)
-	if err != nil {
-		return sandbox, errors.Wrap(err, "failed to get sandbox container info")
-	}
-	createdAt := info.CreatedAt
-
-	// Load sandbox status.
-	t, err := cntr.Task(ctx, nil)
-	if err != nil && !errdefs.IsNotFound(err) {
-		return sandbox, errors.Wrap(err, "failed to load task")
-	}
-	var s containerd.Status
-	var notFound bool
-	if errdefs.IsNotFound(err) {
-		// Task is not found.
-		notFound = true
-	} else {
-		// Task is found. Get task status.
-		s, err = t.Status(ctx)
+	s, err := func() (sandboxstore.Status, error) {
+		status := unknownSandboxStatus()
+		// Load sandbox created timestamp.
+		info, err := cntr.Info(ctx)
 		if err != nil {
-			// It's still possible that task is deleted during this window.
-			if !errdefs.IsNotFound(err) {
-				return sandbox, errors.Wrap(err, "failed to get task status")
-			}
+			return status, errors.Wrap(err, "failed to get sandbox container info")
+		}
+		status.CreatedAt = info.CreatedAt
+
+		// Load sandbox state.
+		t, err := cntr.Task(ctx, nil)
+		if err != nil && !errdefs.IsNotFound(err) {
+			return status, errors.Wrap(err, "failed to load task")
+		}
+		var taskStatus containerd.Status
+		var notFound bool
+		if errdefs.IsNotFound(err) {
+			// Task is not found.
 			notFound = true
-		}
-	}
-	var state sandboxstore.State
-	var pid uint32
-	if notFound {
-		// Task does not exist, set sandbox state as NOTREADY.
-		state = sandboxstore.StateNotReady
-	} else {
-		if s.Status == containerd.Running {
-			// Task is running, set sandbox state as READY.
-			state = sandboxstore.StateReady
-			pid = t.Pid()
 		} else {
-			// Task is not running. Delete the task and set sandbox state as NOTREADY.
-			if _, err := t.Delete(ctx, containerd.WithProcessKill); err != nil && !errdefs.IsNotFound(err) {
-				return sandbox, errors.Wrap(err, "failed to delete task")
+			// Task is found. Get task status.
+			taskStatus, err = t.Status(ctx)
+			if err != nil {
+				// It's still possible that task is deleted during this window.
+				if !errdefs.IsNotFound(err) {
+					return status, errors.Wrap(err, "failed to get task status")
+				}
+				notFound = true
 			}
-			state = sandboxstore.StateNotReady
 		}
+		if notFound {
+			// Task does not exist, set sandbox state as NOTREADY.
+			status.State = sandboxstore.StateNotReady
+		} else {
+			if taskStatus.Status == containerd.Running {
+				// Wait for the task for sandbox monitor.
+				// wait is a long running background request, no timeout needed.
+				exitCh, err := t.Wait(ctrdutil.NamespacedContext())
+				if err != nil {
+					if !errdefs.IsNotFound(err) {
+						return status, errors.Wrap(err, "failed to wait for task")
+					}
+					status.State = sandboxstore.StateNotReady
+				} else {
+					// Task is running, set sandbox state as READY.
+					status.State = sandboxstore.StateReady
+					status.Pid = t.Pid()
+					c.eventMonitor.startExitMonitor(context.Background(), meta.ID, status.Pid, exitCh)
+				}
+			} else {
+				// Task is not running. Delete the task and set sandbox state as NOTREADY.
+				if _, err := t.Delete(ctx, containerd.WithProcessKill); err != nil && !errdefs.IsNotFound(err) {
+					return status, errors.Wrap(err, "failed to delete task")
+				}
+				status.State = sandboxstore.StateNotReady
+			}
+		}
+		return status, nil
+	}()
+	if err != nil {
+		log.G(ctx).WithError(err).Errorf("Failed to load sandbox status for %q", cntr.ID())
 	}
 
-	sandbox = sandboxstore.NewSandbox(
-		*meta,
-		sandboxstore.Status{
-			Pid:       pid,
-			CreatedAt: createdAt,
-			State:     state,
-		},
-	)
+	sandbox = sandboxstore.NewSandbox(*meta, s)
 	sandbox.Container = cntr
 
 	// Load network namespace.
@@ -409,32 +425,32 @@ func (c *criService) loadImages(ctx context.Context, cImages []containerd.Image)
 	for _, i := range cImages {
 		ok, _, _, _, err := containerdimages.Check(ctx, i.ContentStore(), i.Target(), platforms.Default())
 		if err != nil {
-			logrus.WithError(err).Errorf("Failed to check image content readiness for %q", i.Name())
+			log.G(ctx).WithError(err).Errorf("Failed to check image content readiness for %q", i.Name())
 			continue
 		}
 		if !ok {
-			logrus.Warnf("The image content readiness for %q is not ok", i.Name())
+			log.G(ctx).Warnf("The image content readiness for %q is not ok", i.Name())
 			continue
 		}
 		// Checking existence of top-level snapshot for each image being recovered.
 		unpacked, err := i.IsUnpacked(ctx, snapshotter)
 		if err != nil {
-			logrus.WithError(err).Warnf("Failed to check whether image is unpacked for image %s", i.Name())
+			log.G(ctx).WithError(err).Warnf("Failed to check whether image is unpacked for image %s", i.Name())
 			continue
 		}
 		if !unpacked {
-			logrus.Warnf("The image %s is not unpacked.", i.Name())
+			log.G(ctx).Warnf("The image %s is not unpacked.", i.Name())
 			// TODO(random-liu): Consider whether we should try unpack here.
 		}
 		if err := c.updateImage(ctx, i.Name()); err != nil {
-			logrus.WithError(err).Warnf("Failed to update reference for image %q", i.Name())
+			log.G(ctx).WithError(err).Warnf("Failed to update reference for image %q", i.Name())
 			continue
 		}
-		logrus.Debugf("Loaded image %q", i.Name())
+		log.G(ctx).Debugf("Loaded image %q", i.Name())
 	}
 }
 
-func cleanupOrphanedIDDirs(cntrs []containerd.Container, base string) error {
+func cleanupOrphanedIDDirs(ctx context.Context, cntrs []containerd.Container, base string) error {
 	// Cleanup orphaned id directories.
 	dirs, err := ioutil.ReadDir(base)
 	if err != nil && !os.IsNotExist(err) {
@@ -446,7 +462,7 @@ func cleanupOrphanedIDDirs(cntrs []containerd.Container, base string) error {
 	}
 	for _, d := range dirs {
 		if !d.IsDir() {
-			logrus.Warnf("Invalid file %q found in base directory %q", d.Name(), base)
+			log.G(ctx).Warnf("Invalid file %q found in base directory %q", d.Name(), base)
 			continue
 		}
 		if _, ok := idsMap[d.Name()]; ok {
@@ -455,9 +471,9 @@ func cleanupOrphanedIDDirs(cntrs []containerd.Container, base string) error {
 		}
 		dir := filepath.Join(base, d.Name())
 		if err := system.EnsureRemoveAll(dir); err != nil {
-			logrus.WithError(err).Warnf("Failed to remove id directory %q", dir)
+			log.G(ctx).WithError(err).Warnf("Failed to remove id directory %q", dir)
 		} else {
-			logrus.Debugf("Cleanup orphaned id directory %q", dir)
+			log.G(ctx).Debugf("Cleanup orphaned id directory %q", dir)
 		}
 	}
 	return nil

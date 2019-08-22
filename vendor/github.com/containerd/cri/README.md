@@ -15,7 +15,7 @@ for information about the standalone version of `cri-containerd`.*
 [![Build Status](https://api.travis-ci.org/containerd/cri.svg?style=flat-square)](https://travis-ci.org/containerd/cri)
 [![Go Report Card](https://goreportcard.com/badge/github.com/containerd/cri)](https://goreportcard.com/report/github.com/containerd/cri)
 
-`cri` is a [containerd](https://containerd.io/) plugin implementation of Kubernetes [container runtime interface (CRI)](https://github.com/kubernetes/kubernetes/blob/master/pkg/kubelet/apis/cri/runtime/v1alpha2/api.proto).
+`cri` is a [containerd](https://containerd.io/) plugin implementation of Kubernetes [container runtime interface (CRI)](https://github.com/kubernetes/cri-api/blob/master/pkg/apis/runtime/v1alpha2/api.proto).
 
 With it, you could run Kubernetes using containerd as the container runtime.
 ![cri](./docs/cri.png)
@@ -38,6 +38,19 @@ See [test dashboard](https://k8s-testgrid.appspot.com/sig-node-containerd)
 |       End-Of-Life      |        v1.1        |        1.10+       |   v1alpha2  |
 |                        |        v1.2        |        1.10+       |   v1alpha2  |
 |                        |        HEAD        |        1.10+       |   v1alpha2  |
+
+**Note:** The support table above specifies the Kubernetes Version that was supported at time of release of the containerd - cri integration.
+
+The following is the current support table for containerd CRI integration taking into account that Kubernetes only supports n-3 minor release versions and 1.10 and 1.11 are now end-of-life.
+
+| Containerd Version | Kubernetes Version | CRI Version |
+|:------------------:|:------------------:|:-----------:|
+|        v1.1        |        1.12+       |   v1alpha2  |
+|        v1.2        |        1.12+       |   v1alpha2  |
+|        HEAD        |        1.12+       |   v1alpha2  |
+
+***Although not recommended, if you still plan to use containerd 1.2+ with Kubernetes
+<=1.11, please be sure to set `disable_proc_mount=true`.***
 
 ## Production Quality Cluster on GCE
 For a production quality cluster on GCE brought up with `kube-up.sh` refer [here](docs/kube-up.md).
@@ -151,7 +164,7 @@ For sync communication we have a community slack with a #containerd channel that
 everyone is welcome to join and chat about development.
 
 **Slack:** Catch us in the #containerd and #containerd-dev channels on dockercommunity.slack.com.
-[Click here for an invite to docker community slack.](https://join.slack.com/t/dockercommunity/shared_invite/enQtNDY4MDc1Mzc0MzIwLTgxZDBlMmM4ZGEyNDc1N2FkMzlhODJkYmE1YTVkYjM1MDE3ZjAwZjBkOGFlOTJkZjRmZGYzNjYyY2M3ZTUxYzQ)
+[Click here for an invite to docker community slack.](https://dockr.ly/slack)
 
 ## Other Communications
 As this project is tightly coupled to CRI and CRI-Tools and they are Kubernetes
