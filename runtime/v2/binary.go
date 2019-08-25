@@ -24,6 +24,7 @@ import (
 	gruntime "runtime"
 	"strings"
 
+	"github.com/Microsoft/hcsshim/pkg/octtrpc"
 	"github.com/containerd/containerd/events/exchange"
 	"github.com/containerd/containerd/log"
 	"github.com/containerd/containerd/runtime"
@@ -103,7 +104,7 @@ func (b *binary) Start(ctx context.Context, opts *types.Any, onClose func()) (_ 
 	if err != nil {
 		return nil, err
 	}
-	client := ttrpc.NewClient(conn, ttrpc.WithOnClose(onClose))
+	client := ttrpc.NewClient(conn, ttrpc.WithOnClose(onClose), ttrpc.WithUnaryClientInterceptor(octtrpc.ClientInterceptor()))
 	return &shim{
 		bundle:  b.bundle,
 		client:  client,
