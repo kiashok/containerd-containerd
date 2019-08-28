@@ -57,6 +57,11 @@ func init() {
 	})
 }
 
+const (
+	rootfsSizeLabel = "containerd.io/snapshot/io.microsoft.container.storage.rootfs.size-gb"
+	rootfsLocLabel  = "containerd.io/snapshot/io.microsoft.container.storage.rootfs.location"
+)
+
 type snapshotter struct {
 	root string
 	ms   *storage.MetaStore
@@ -319,7 +324,21 @@ func (s *snapshotter) createSnapshot(ctx context.Context, kind snapshots.Kind, k
 			return nil, err
 		}
 
-		scratchSource, err := s.openOrCreateScratch(ctx)
+		var snapshotInfo snapshots.Info
+		for _, o := range opts {
+			o(&snapshotInfo)
+		}
+
+		var sizeGB int
+		if sizeGBstr, ok := snapshotInfo.Labels[rootfsSizeLabel]; ok {
+			i64, _ := strconv.ParseInt(sizeGBstr, 10, 32)
+			sizeGB = int(i64)
+		}
+
+		var scratchLocation string
+		scratchLocation, _ = snapshotInfo.Labels[rootfsLocLabel]
+
+		scratchSource, err := s.openOrCreateScratch(ctx, sizeGB, scratchLocation)
 		if err != nil {
 			return nil, err
 		}
@@ -350,19 +369,28 @@ func (s *snapshotter) createSnapshot(ctx context.Context, kind snapshots.Kind, k
 	return s.mounts(newSnapshot), nil
 }
 
-func (s *snapshotter) openOrCreateScratch(ctx context.Context) (_ *os.File, err error) {
+func (s *snapshotter) openOrCreateScratch(ctx context.Context, sizeGB int, scratchLoc string) (_ *os.File, err error) {
 	// Create the scratch.vhdx cache file if it doesn't already exit.
 	s.scratchLock.Lock()
 	defer s.scratchLock.Unlock()
 
-	scratchFinalPath := filepath.Join(s.root, "scratch.vhdx")
+	vhdFileName := "scratch.vhdx"
+	if sizeGB > 0 {
+		vhdFileName = fmt.Sprintf("scratch_%d.vhdx", sizeGB)
+	}
+
+	scratchFinalPath := filepath.Join(s.root, vhdFileName)
+	if scratchLoc != "" {
+		scratchFinalPath = filepath.Join(scratchLoc, vhdFileName)
+	}
+
 	scratchSource, err := os.OpenFile(scratchFinalPath, os.O_RDONLY, 0700)
 	if err != nil {
 		if !os.IsNotExist(err) {
-			return nil, errors.Wrap(err, "failed to open scratch.vhdx for read")
+			return nil, errors.Wrapf(err, "failed to open vhd %s for read", vhdFileName)
 		}
 
-		log.G(ctx).Debug("scratch.vhdx not found, creating a new one")
+		log.G(ctx).Debugf("vhd %s not found, creating a new one", vhdFileName)
 
 		// Golang logic for ioutil.TempFile without the file creation
 		r := uint32(time.Now().UnixNano() + int64(os.Getpid()))
@@ -378,7 +406,12 @@ func (s *snapshotter) openOrCreateScratch(ctx context.Context) (_ *os.File, err 
 			LogFormat: runhcs.JSON,
 			Owner:     "containerd",
 		}
-		if err := rhcs.CreateScratch(ctx, scratchTempPath); err != nil {
+
+		opt := runhcs.CreateScratchOpts{
+			SizeGB: sizeGB,
+		}
+
+		if err := rhcs.CreateScratchWithOpts(ctx, scratchTempPath, &opt); err != nil {
 			_ = os.Remove(scratchTempPath)
 			return nil, errors.Wrapf(err, "failed to create '%s' temp file", scratchTempName)
 		}
@@ -391,6 +424,8 @@ func (s *snapshotter) openOrCreateScratch(ctx context.Context) (_ *os.File, err 
 			_ = os.Remove(scratchFinalPath)
 			return nil, errors.Wrap(err, "failed to open scratch.vhdx for read after creation")
 		}
+	} else {
+		log.G(ctx).Debugf("scratch vhd %s was already present. Retrieved from cache", vhdFileName)
 	}
 	return scratchSource, nil
 }
