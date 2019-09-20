@@ -26,6 +26,7 @@ import (
 	"github.com/containerd/containerd"
 	"github.com/containerd/containerd/cmd/ctr/commands"
 	"github.com/containerd/containerd/contrib/nvidia"
+	"github.com/containerd/containerd/contrib/seccomp"
 	"github.com/containerd/containerd/oci"
 	"github.com/containerd/containerd/platforms"
 	"github.com/opencontainers/runtime-spec/specs-go"
@@ -63,6 +64,9 @@ func NewContainer(ctx gocontext.Context, client *containerd.Client, context *cli
 			args = context.Args()[2:]
 		)
 		opts = append(opts, oci.WithDefaultSpec(), oci.WithDefaultUnixDevices)
+		if ef := context.String("env-file"); ef != "" {
+			opts = append(opts, oci.WithEnvFile(ef))
+		}
 		opts = append(opts, oci.WithEnv(context.StringSlice("env")))
 		opts = append(opts, withMounts(context))
 
@@ -125,6 +129,9 @@ func NewContainer(ctx gocontext.Context, client *containerd.Client, context *cli
 		}
 		if context.Bool("net-host") {
 			opts = append(opts, oci.WithHostNamespace(specs.NetworkNamespace), oci.WithHostHostsFile, oci.WithHostResolvconf)
+		}
+		if context.Bool("seccomp") {
+			opts = append(opts, seccomp.WithDefaultProfile())
 		}
 
 		joinNs := context.StringSlice("with-ns")

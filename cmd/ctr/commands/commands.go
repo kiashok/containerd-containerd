@@ -77,6 +77,10 @@ var (
 			Name:  "env",
 			Usage: "specify additional container environment variables (i.e. FOO=bar)",
 		},
+		cli.StringFlag{
+			Name:  "env-file",
+			Usage: "specify additional container environment variables in a file(i.e. FOO=bar, one per line)",
+		},
 		cli.StringSliceFlag{
 			Name:  "label",
 			Usage: "specify additional labels (i.e. foo=bar)",
@@ -129,6 +133,10 @@ var (
 		cli.StringSliceFlag{
 			Name:  "device",
 			Usage: "add a device to a container",
+		},
+		cli.BoolFlag{
+			Name:  "seccomp",
+			Usage: "enable the default seccomp profile",
 		},
 	}
 )
