@@ -20,16 +20,13 @@ package zfs
 
 import (
 	"context"
-	"path/filepath"
-
 	"github.com/containerd/containerd/log"
 	"github.com/containerd/containerd/mount"
-	"github.com/containerd/containerd/platforms"
-	"github.com/containerd/containerd/plugin"
 	"github.com/containerd/containerd/snapshots"
 	"github.com/containerd/containerd/snapshots/storage"
 	zfs "github.com/mistifyio/go-zfs"
 	"github.com/pkg/errors"
+	"path/filepath"
 )
 
 const (
@@ -39,17 +36,6 @@ const (
 	snapshotSuffix = "snapshot"
 )
 
-func init() {
-	plugin.Register(&plugin.Registration{
-		Type: plugin.SnapshotPlugin,
-		ID:   "zfs",
-		InitFn: func(ic *plugin.InitContext) (interface{}, error) {
-			ic.Meta.Platforms = append(ic.Meta.Platforms, platforms.DefaultSpec())
-			ic.Meta.Exports["root"] = ic.Root
-			return NewSnapshotter(ic.Root)
-		},
-	})
-}
 
 type snapshotter struct {
 	dataset *zfs.Dataset
@@ -66,7 +52,7 @@ func NewSnapshotter(root string) (snapshots.Snapshotter, error) {
 		return nil, err
 	}
 	if m.FSType != "zfs" {
-		return nil, errors.Wrapf(plugin.ErrSkipPlugin, "path %s must be a zfs filesystem to be used with the zfs snapshotter", root)
+		return nil, errors.Errorf("path %s must be a zfs filesystem to be used with the zfs snapshotter", root)
 	}
 	dataset, err := zfs.GetDataset(m.Source)
 	if err != nil {
@@ -134,13 +120,13 @@ func (z *snapshotter) Usage(ctx context.Context, key string) (snapshots.Usage, e
 }
 
 // Walk the committed snapshots.
-func (z *snapshotter) Walk(ctx context.Context, fn func(context.Context, snapshots.Info) error) error {
+func (z *snapshotter) Walk(ctx context.Context, fn snapshots.WalkFunc, filters ...string) error {
 	ctx, t, err := z.ms.TransactionContext(ctx, false)
 	if err != nil {
 		return err
 	}
 	defer t.Rollback()
-	return storage.WalkInfo(ctx, fn)
+	return storage.WalkInfo(ctx, fn, filters...)
 }
 
 func (z *snapshotter) Prepare(ctx context.Context, key, parent string, opts ...snapshots.Opt) ([]mount.Mount, error) {
@@ -227,7 +213,7 @@ func (z *snapshotter) Commit(ctx context.Context, name, key string, opts ...snap
 		}
 	}()
 
-	id, err := storage.CommitActive(ctx, key, name, snapshots.Usage{})
+	id, err := storage.CommitActive(ctx, key, name, snapshots.Usage{}, opts...)
 	if err != nil {
 		return errors.Wrap(err, "failed to commit")
 	}

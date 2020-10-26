@@ -29,11 +29,11 @@ import (
 	"github.com/containerd/containerd/metadata"
 	"github.com/containerd/containerd/mount"
 	"github.com/containerd/containerd/namespaces"
+	"github.com/containerd/containerd/pkg/timeout"
 	"github.com/containerd/containerd/platforms"
 	"github.com/containerd/containerd/plugin"
 	"github.com/containerd/containerd/runtime"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
-	bolt "go.etcd.io/bbolt"
 )
 
 // Config for the v2 runtime
@@ -69,13 +69,15 @@ func init() {
 			if err != nil {
 				return nil, err
 			}
-			return New(ic.Context, ic.Root, ic.State, ic.Address, ic.TTRPCAddress, ic.Events, m.(*metadata.DB))
+			cs := metadata.NewContainerStore(m.(*metadata.DB))
+
+			return New(ic.Context, ic.Root, ic.State, ic.Address, ic.TTRPCAddress, ic.Events, cs)
 		},
 	})
 }
 
 // New task manager for v2 shims
-func New(ctx context.Context, root, state, containerdAddress, containerdTTRPCAddress string, events *exchange.Exchange, db *metadata.DB) (*TaskManager, error) {
+func New(ctx context.Context, root, state, containerdAddress, containerdTTRPCAddress string, events *exchange.Exchange, cs containers.Store) (*TaskManager, error) {
 	for _, d := range []string{root, state} {
 		if err := os.MkdirAll(d, 0711); err != nil {
 			return nil, err
@@ -88,7 +90,7 @@ func New(ctx context.Context, root, state, containerdAddress, containerdTTRPCAdd
 		containerdTTRPCAddress: containerdTTRPCAddress,
 		tasks:                  runtime.NewTaskList(),
 		events:                 events,
-		db:                     db,
+		containers:             cs,
 	}
 	if err := m.loadExistingTasks(ctx); err != nil {
 		return nil, err
@@ -103,9 +105,9 @@ type TaskManager struct {
 	containerdAddress      string
 	containerdTTRPCAddress string
 
-	tasks  *runtime.TaskList
-	events *exchange.Exchange
-	db     *metadata.DB
+	tasks      *runtime.TaskList
+	events     *exchange.Exchange
+	containers containers.Store
 }
 
 // ID of the task manager
@@ -136,12 +138,8 @@ func (m *TaskManager) Create(ctx context.Context, id string, opts runtime.Create
 	b := shimBinary(ctx, bundle, opts.Runtime, m.containerdAddress, m.containerdTTRPCAddress, m.events, m.tasks)
 	shim, err := b.Start(ctx, topts, func() {
 		log.G(ctx).WithField("id", id).Info("shim disconnected")
-		_, err := m.tasks.Get(ctx, id)
-		if err != nil {
-			// Task was never started or was already successfully deleted
-			return
-		}
-		cleanupAfterDeadShim(context.Background(), id, ns, m.events, b)
+
+		cleanupAfterDeadShim(context.Background(), id, ns, m.tasks, m.events, b)
 		// Remove self from the runtime task list. Even though the cleanupAfterDeadShim()
 		// would publish taskExit event, but the shim.Delete() would always failed with ttrpc
 		// disconnect and there is no chance to remove this dead task from runtime task lists.
@@ -153,8 +151,13 @@ func (m *TaskManager) Create(ctx context.Context, id string, opts runtime.Create
 	}
 	defer func() {
 		if err != nil {
-			shim.Shutdown(ctx)
-			shim.Close()
+			dctx, cancel := timeout.WithContext(context.Background(), cleanupTimeout)
+			defer cancel()
+			_, errShim := shim.Delete(dctx)
+			if errShim != nil {
+				shim.Shutdown(ctx)
+				shim.Close()
+			}
 		}
 	}()
 	t, err := shim.Create(ctx, opts)
@@ -259,17 +262,13 @@ func (m *TaskManager) loadTasks(ctx context.Context) error {
 		binaryCall := shimBinary(ctx, bundle, container.Runtime.Name, m.containerdAddress, m.containerdTTRPCAddress, m.events, m.tasks)
 		shim, err := loadShim(ctx, bundle, m.events, m.tasks, func() {
 			log.G(ctx).WithField("id", id).Info("shim disconnected")
-			_, err := m.tasks.Get(ctx, id)
-			if err != nil {
-				// Task was never started or was already successfully deleted
-				return
-			}
-			cleanupAfterDeadShim(context.Background(), id, ns, m.events, binaryCall)
+
+			cleanupAfterDeadShim(context.Background(), id, ns, m.tasks, m.events, binaryCall)
 			// Remove self from the runtime task list.
 			m.tasks.Delete(ctx, id)
 		})
 		if err != nil {
-			cleanupAfterDeadShim(ctx, id, ns, m.events, binaryCall)
+			cleanupAfterDeadShim(ctx, id, ns, m.tasks, m.events, binaryCall)
 			continue
 		}
 		m.tasks.Add(ctx, shim)
@@ -278,13 +277,8 @@ func (m *TaskManager) loadTasks(ctx context.Context) error {
 }
 
 func (m *TaskManager) container(ctx context.Context, id string) (*containers.Container, error) {
-	var container containers.Container
-	if err := m.db.View(func(tx *bolt.Tx) error {
-		store := metadata.NewContainerStore(tx)
-		var err error
-		container, err = store.Get(ctx, id)
-		return err
-	}); err != nil {
+	container, err := m.containers.Get(ctx, id)
+	if err != nil {
 		return nil, err
 	}
 	return &container, nil

@@ -61,6 +61,23 @@ var (
 			Name:  "refresh",
 			Usage: "refresh token for authorization server",
 		},
+		cli.StringFlag{
+			Name: "hosts-dir",
+			// compatible with "/etc/docker/certs.d"
+			Usage: "Custom hosts configuration directory",
+		},
+		cli.StringFlag{
+			Name:  "tlscacert",
+			Usage: "path to TLS root CA",
+		},
+		cli.StringFlag{
+			Name:  "tlscert",
+			Usage: "path to TLS client certificate",
+		},
+		cli.StringFlag{
+			Name:  "tlskey",
+			Usage: "path to TLS client key",
+		},
 	}
 
 	// ContainerFlags are cli flags specifying container options
@@ -137,6 +154,10 @@ var (
 		cli.BoolFlag{
 			Name:  "seccomp",
 			Usage: "enable the default seccomp profile",
+		},
+		cli.StringFlag{
+			Name:  "seccomp-profile",
+			Usage: "file path to custom seccomp profile. seccomp must be set to true, before using seccomp-profile",
 		},
 	}
 )
