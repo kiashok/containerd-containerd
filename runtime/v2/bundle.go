@@ -18,6 +18,8 @@ package v2
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -25,8 +27,6 @@ import (
 	"github.com/containerd/containerd/log"
 	"github.com/containerd/containerd/mount"
 	"github.com/containerd/containerd/namespaces"
-	cioutil "github.com/containerd/containerd/pkg/ioutil"
-	"github.com/pkg/errors"
 )
 
 const configFilename = "config.json"
@@ -47,7 +47,7 @@ func LoadBundle(ctx context.Context, root, id string) (*Bundle, error) {
 // NewBundle returns a new bundle on disk
 func NewBundle(ctx context.Context, root, state, id string, spec []byte) (b *Bundle, err error) {
 	if err := identifiers.Validate(id); err != nil {
-		return nil, errors.Wrapf(err, "invalid task id %s", id)
+		return nil, fmt.Errorf("invalid task id %s: %w", id, err)
 	}
 
 	ns, err := namespaces.NamespaceRequired(ctx)
@@ -138,10 +138,10 @@ func (b *Bundle) Delete(ctx context.Context) error {
 	}
 
 	if err := mount.UnmountAll(rootfs, 0); err != nil {
-		return errors.Wrapf(err, "unmount rootfs %s", rootfs)
+		return fmt.Errorf("unmount rootfs %s: %w", rootfs, err)
 	}
 	if err := os.Remove(rootfs); err != nil && !os.IsNotExist(err) {
-		return errors.Wrap(err, "failed to remove bundle rootfs")
+		return fmt.Errorf("failed to remove bundle rootfs: %w", err)
 	}
 	err = atomicDelete(b.Path)
 	if err == nil {
@@ -158,5 +158,5 @@ func (b *Bundle) Delete(ctx context.Context) error {
 			return err
 		}
 	}
-	return errors.Wrapf(err, "failed to remove both bundle and workdir locations: %v", err2)
+	return fmt.Errorf("failed to remove both bundle and workdir locations: %v: %w", err2, err)
 }
