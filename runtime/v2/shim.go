@@ -227,7 +227,7 @@ func (s *shim) delete(ctx context.Context) error {
 		result = multierror.Append(result, fmt.Errorf("close wait error: %w", err))
 	}
 
-	if err := s.bundle.Delete(); err != nil {
+	if err := s.bundle.Delete(ctx); err != nil {
 		log.G(ctx).WithField("id", s.ID()).WithError(err).Error("failed to delete bundle")
 		result = multierror.Append(result, fmt.Errorf("failed to delete bundle: %w", err))
 	}

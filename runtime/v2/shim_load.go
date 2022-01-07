@@ -80,12 +80,12 @@ func (m *ShimManager) loadShims(ctx context.Context) error {
 		// fast path
 		bf, err := os.ReadDir(bundle.Path)
 		if err != nil {
-			bundle.Delete()
+			bundle.Delete(ctx)
 			log.G(ctx).WithError(err).Errorf("fast path read bundle path for %s", bundle.Path)
 			continue
 		}
 		if len(bf) == 0 {
-			bundle.Delete()
+			bundle.Delete(ctx)
 			continue
 		}
 
@@ -108,7 +108,7 @@ func (m *ShimManager) loadShims(ctx context.Context) error {
 				if err := mount.UnmountAll(filepath.Join(bundle.Path, "rootfs"), 0); err != nil {
 					log.G(ctx).WithError(err).Errorf("failed to unmount of rootfs %s", id)
 				}
-				bundle.Delete()
+				bundle.Delete(ctx)
 				continue
 			}
 			runtime = container.Runtime.Name
@@ -116,7 +116,7 @@ func (m *ShimManager) loadShims(ctx context.Context) error {
 
 		runtime, err = m.resolveRuntimePath(runtime)
 		if err != nil {
-			bundle.Delete()
+			bundle.Delete(ctx)
 			log.G(ctx).WithError(err).Error("failed to resolve runtime path")
 			continue
 		}

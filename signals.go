@@ -1,12 +1,9 @@
 /*
    Copyright The containerd Authors.
-
    Licensed under the Apache License, Version 2.0 (the "License");
    you may not use this file except in compliance with the License.
    You may obtain a copy of the License at
-
        http://www.apache.org/licenses/LICENSE-2.0
-
    Unless required by applicable law or agreed to in writing, software
    distributed under the License is distributed on an "AS IS" BASIS,
    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -51,13 +48,15 @@ func GetStopSignal(ctx context.Context, container Container, defaultSignal sysca
 func GetOCIStopSignal(ctx context.Context, image Image, defaultSignal string) (string, error) {
 	_, err := signal.ParseSignal(defaultSignal)
 	if err != nil {
+		return "", err
+	}
 	ic, err := image.Config(ctx)
 	if err != nil {
 		return "", err
+	}
 	var (
 		ociimage v1.Image
 		config   v1.ImageConfig
-		platform string = platforms.DefaultSpec().OS
 	)
 	switch ic.MediaType {
 	case v1.MediaTypeImageConfig, images.MediaTypeDockerSchema2Config:
@@ -70,14 +69,8 @@ func GetOCIStopSignal(ctx context.Context, image Image, defaultSignal string) (s
 			return "", err
 		}
 		config = ociimage.Config
-		platform = ociimage.OS
 	default:
 		return "", fmt.Errorf("unknown image config media type %s", ic.MediaType)
-	}
-
-	// verify that default signal is valid
-	if _, err := ParsePlatformSignal(defaultSignal, platform); err != nil {
-		return "", err
 	}
 
 	if config.StopSignal == "" {
