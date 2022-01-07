@@ -1,3 +1,4 @@
+//go:build linux
 // +build linux
 
 /*
@@ -29,13 +30,15 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/containerd/containerd/log"
+	blkdiscard "github.com/containerd/containerd/snapshots/devmapper/blkdiscard"
 	"github.com/containerd/containerd/snapshots/devmapper/dmsetup"
 )
 
 // PoolDevice ties together data and metadata volumes, represents thin-pool and manages volumes, snapshots and device ids.
 type PoolDevice struct {
-	poolName string
-	metadata *PoolMetadata
+	poolName      string
+	metadata      *PoolMetadata
+	discardBlocks bool
 }
 
 // NewPoolDevice creates new thin-pool from existing data and metadata volumes.
@@ -45,11 +48,20 @@ func NewPoolDevice(ctx context.Context, config *Config) (*PoolDevice, error) {
 
 	version, err := dmsetup.Version()
 	if err != nil {
-		log.G(ctx).Errorf("dmsetup not available")
+		log.G(ctx).Error("dmsetup not available")
 		return nil, err
 	}
 
 	log.G(ctx).Infof("using dmsetup:\n%s", version)
+
+	if config.DiscardBlocks {
+		blkdiscardVersion, err := blkdiscard.Version()
+		if err != nil {
+			log.G(ctx).Error("blkdiscard is not available")
+			return nil, err
+		}
+		log.G(ctx).Infof("using blkdiscard:\n%s", blkdiscardVersion)
+	}
 
 	dbpath := filepath.Join(config.RootPath, config.PoolName+".db")
 	poolMetaStore, err := NewPoolMetadata(dbpath)
@@ -64,8 +76,9 @@ func NewPoolDevice(ctx context.Context, config *Config) (*PoolDevice, error) {
 	}
 
 	poolDevice := &PoolDevice{
-		poolName: config.PoolName,
-		metadata: poolMetaStore,
+		poolName:      config.PoolName,
+		metadata:      poolMetaStore,
+		discardBlocks: config.DiscardBlocks,
 	}
 
 	if err := poolDevice.ensureDeviceStates(ctx); err != nil {
@@ -73,6 +86,33 @@ func NewPoolDevice(ctx context.Context, config *Config) (*PoolDevice, error) {
 	}
 
 	return poolDevice, nil
+}
+
+func retry(ctx context.Context, f func() error) error {
+	var (
+		maxRetries = 100
+		retryDelay = 100 * time.Millisecond
+		retryErr   error
+	)
+
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		retryErr = f()
+		if retryErr == nil {
+			return nil
+		} else if retryErr != unix.EBUSY {
+			return retryErr
+		}
+
+		// Don't spam logs
+		if attempt%10 == 0 {
+			log.G(ctx).WithError(retryErr).Warnf("retrying... (%d of %d)", attempt, maxRetries)
+		}
+
+		// Devmapper device is busy, give it a bit of time and retry removal
+		time.Sleep(retryDelay)
+	}
+
+	return retryErr
 }
 
 // ensureDeviceStates updates devices to their real state:
@@ -304,12 +344,6 @@ func (p *PoolDevice) CreateSnapshotDevice(ctx context.Context, deviceName string
 		}
 	}()
 
-	// Save snapshot metadata and allocate new device ID
-	metaErr = p.metadata.AddDevice(ctx, snapInfo)
-	if metaErr != nil {
-		return metaErr
-	}
-
 	// The base device must be suspend before taking a snapshot to
 	// avoid corruption.
 	// https://github.com/torvalds/linux/blob/v5.7/Documentation/admin-guide/device-mapper/thin-provisioning.rst#internal-snapshots
@@ -325,6 +359,12 @@ func (p *PoolDevice) CreateSnapshotDevice(ctx context.Context, deviceName string
 				log.G(ctx).WithError(err).Errorf("failed to resume base device %q after taking its snapshot", baseInfo.Name)
 			}
 		}()
+	}
+
+	// Save snapshot metadata and allocate new device ID
+	metaErr = p.metadata.AddDevice(ctx, snapInfo)
+	if metaErr != nil {
+		return metaErr
 	}
 
 	// Create thin device snapshot
@@ -368,6 +408,7 @@ func (p *PoolDevice) SuspendDevice(ctx context.Context, deviceName string) error
 	return nil
 }
 
+// ResumeDevice resumes IO for the given device
 func (p *PoolDevice) ResumeDevice(ctx context.Context, deviceName string) error {
 	if err := p.transition(ctx, deviceName, Resuming, Resumed, func() error {
 		return dmsetup.ResumeDevice(deviceName)
@@ -393,30 +434,23 @@ func (p *PoolDevice) DeactivateDevice(ctx context.Context, deviceName string, de
 	}
 
 	if err := p.transition(ctx, deviceName, Deactivating, Deactivated, func() error {
-		var (
-			maxRetries = 100
-			retryDelay = 100 * time.Millisecond
-			retryErr   error
-		)
-
-		for attempt := 1; attempt <= maxRetries; attempt++ {
-			retryErr = dmsetup.RemoveDevice(deviceName, opts...)
-			if retryErr == nil {
-				return nil
-			} else if retryErr != unix.EBUSY {
-				return retryErr
+		return retry(ctx, func() error {
+			if !deferred && p.discardBlocks {
+				err := dmsetup.DiscardBlocks(deviceName)
+				if err != nil {
+					if err == dmsetup.ErrInUse {
+						log.G(ctx).Warnf("device %q is in use, skipping blkdiscard", deviceName)
+					} else {
+						return err
+					}
+				}
+			}
+			if err := dmsetup.RemoveDevice(deviceName, opts...); err != nil {
+				return errors.Wrap(err, "failed to deactivate device")
 			}
 
-			// Don't spam logs
-			if attempt%10 == 0 {
-				log.G(ctx).WithError(retryErr).Warnf("failed to deactivate device, retrying... (%d of %d)", attempt, maxRetries)
-			}
-
-			// Devmapper device is busy, give it a bit of time and retry removal
-			time.Sleep(retryDelay)
-		}
-
-		return retryErr
+			return nil
+		})
 	}); err != nil {
 		return errors.Wrapf(err, "failed to deactivate device %q", deviceName)
 	}
@@ -457,7 +491,7 @@ func (p *PoolDevice) GetUsage(deviceName string) (int64, error) {
 	}
 
 	if len(status.Params) == 0 {
-		return 0, errors.Errorf("failed to get the number of used blocks, unexpected output from dmsetup status")
+		return 0, errors.New("failed to get the number of used blocks, unexpected output from dmsetup status")
 	}
 
 	count, err := strconv.ParseInt(status.Params[0], 10, 64)
@@ -493,14 +527,15 @@ func (p *PoolDevice) RemoveDevice(ctx context.Context, deviceName string) error 
 
 func (p *PoolDevice) deleteDevice(ctx context.Context, info *DeviceInfo) error {
 	if err := p.transition(ctx, info.Name, Removing, Removed, func() error {
-		// Send 'delete' message to thin-pool
-		e := dmsetup.DeleteDevice(p.poolName, info.DeviceID)
-
-		// Ignores the error if the device has been deleted already.
-		if e != nil && !errors.Is(e, unix.ENODATA) {
-			return e
-		}
-		return nil
+		return retry(ctx, func() error {
+			// Send 'delete' message to thin-pool
+			e := dmsetup.DeleteDevice(p.poolName, info.DeviceID)
+			// Ignores the error if the device has been deleted already.
+			if e != nil && !errors.Is(e, unix.ENODATA) {
+				return e
+			}
+			return nil
+		})
 	}); err != nil {
 		return errors.Wrapf(err, "failed to delete device %q (dev id: %d)", info.Name, info.DeviceID)
 	}

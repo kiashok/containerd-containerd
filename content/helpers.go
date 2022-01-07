@@ -19,7 +19,6 @@ package content
 import (
 	"context"
 	"io"
-	"io/ioutil"
 	"math/rand"
 	"sync"
 	"time"
@@ -144,8 +143,13 @@ func Copy(ctx context.Context, cw Writer, r io.Reader, size int64, expected dige
 		}
 	}
 
-	if _, err := copyWithBuffer(cw, r); err != nil {
+	copied, err := copyWithBuffer(cw, r)
+	if err != nil {
 		return errors.Wrap(err, "failed to copy")
+	}
+	if size != 0 && copied < size-ws.Offset {
+		// Short writes would return its own error, this indicates a read failure
+		return errors.Wrapf(io.ErrUnexpectedEOF, "failed to read expected number of bytes")
 	}
 
 	if err := cw.Commit(ctx, size, expected, opts...); err != nil {
@@ -165,8 +169,15 @@ func CopyReaderAt(cw Writer, ra ReaderAt, n int64) error {
 		return err
 	}
 
-	_, err = copyWithBuffer(cw, io.NewSectionReader(ra, ws.Offset, n))
-	return err
+	copied, err := copyWithBuffer(cw, io.NewSectionReader(ra, ws.Offset, n))
+	if err != nil {
+		return errors.Wrap(err, "failed to copy")
+	}
+	if copied < n {
+		// Short writes would return its own error, this indicates a read failure
+		return errors.Wrap(io.ErrUnexpectedEOF, "failed to read expected number of bytes")
+	}
+	return nil
 }
 
 // CopyReader copies to a writer from a given reader, returning
@@ -218,20 +229,58 @@ func seekReader(r io.Reader, offset, size int64) (io.Reader, error) {
 	}
 
 	// well then, let's just discard up to the offset
-	n, err := copyWithBuffer(ioutil.Discard, io.LimitReader(r, offset))
+	n, err := copyWithBuffer(io.Discard, io.LimitReader(r, offset))
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to discard to offset")
 	}
 	if n != offset {
-		return nil, errors.Errorf("unable to discard to offset")
+		return nil, errors.New("unable to discard to offset")
 	}
 
 	return r, nil
 }
 
+// copyWithBuffer is very similar to  io.CopyBuffer https://golang.org/pkg/io/#CopyBuffer
+// but instead of using Read to read from the src, we use ReadAtLeast to make sure we have
+// a full buffer before we do a write operation to dst to reduce overheads associated
+// with the write operations of small buffers.
 func copyWithBuffer(dst io.Writer, src io.Reader) (written int64, err error) {
-	buf := bufPool.Get().(*[]byte)
-	written, err = io.CopyBuffer(dst, src, *buf)
-	bufPool.Put(buf)
+	// If the reader has a WriteTo method, use it to do the copy.
+	// Avoids an allocation and a copy.
+	if wt, ok := src.(io.WriterTo); ok {
+		return wt.WriteTo(dst)
+	}
+	// Similarly, if the writer has a ReadFrom method, use it to do the copy.
+	if rt, ok := dst.(io.ReaderFrom); ok {
+		return rt.ReadFrom(src)
+	}
+	bufRef := bufPool.Get().(*[]byte)
+	defer bufPool.Put(bufRef)
+	buf := *bufRef
+	for {
+		nr, er := io.ReadAtLeast(src, buf, len(buf))
+		if nr > 0 {
+			nw, ew := dst.Write(buf[0:nr])
+			if nw > 0 {
+				written += int64(nw)
+			}
+			if ew != nil {
+				err = ew
+				break
+			}
+			if nr != nw {
+				err = io.ErrShortWrite
+				break
+			}
+		}
+		if er != nil {
+			// If an EOF happens after reading fewer than the requested bytes,
+			// ReadAtLeast returns ErrUnexpectedEOF.
+			if er != io.EOF && er != io.ErrUnexpectedEOF {
+				err = er
+			}
+			break
+		}
+	}
 	return
 }

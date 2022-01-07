@@ -17,24 +17,25 @@
 #
 # Builds and installs cni plugins to /opt/cni/bin,
 # and create basic cni config in /etc/cni/net.d.
-# The commit defined in vendor.conf
+# The commit defined in go.mod
 #
 set -eu -o pipefail
 
-CNI_COMMIT=$(grep containernetworking/plugins "$GOPATH"/src/github.com/containerd/containerd/vendor.conf | awk '{print $2}')
+CNI_COMMIT=${1:-$(grep containernetworking/plugins "$GOPATH"/src/github.com/containerd/containerd/go.mod | awk '{print $2}')}
 CNI_DIR=${DESTDIR:=''}/opt/cni
 CNI_CONFIG_DIR=${DESTDIR}/etc/cni/net.d
 
-go get -d github.com/containernetworking/plugins/...
-cd "$GOPATH"/src/github.com/containernetworking/plugins
-git checkout $CNI_COMMIT
+TMPROOT=$(mktemp -d)
+git clone https://github.com/containernetworking/plugins.git "${TMPROOT}"/plugins
+pushd "${TMPROOT}"/plugins
+git checkout "$CNI_COMMIT"
 ./build_linux.sh
 mkdir -p $CNI_DIR
 cp -r ./bin $CNI_DIR
 mkdir -p $CNI_CONFIG_DIR
 cat << EOF | tee $CNI_CONFIG_DIR/10-containerd-net.conflist
 {
-  "cniVersion": "0.4.0",
+  "cniVersion": "1.0.0",
   "name": "containerd-net",
   "plugins": [
     {
@@ -66,3 +67,6 @@ cat << EOF | tee $CNI_CONFIG_DIR/10-containerd-net.conflist
   ]
 }
 EOF
+
+popd
+rm -fR "${TMPROOT}"

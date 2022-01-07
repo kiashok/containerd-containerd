@@ -30,7 +30,7 @@ import (
 	"github.com/pkg/errors"
 	"golang.org/x/net/context"
 	"k8s.io/client-go/tools/remotecommand"
-	runtime "k8s.io/cri-api/pkg/apis/runtime/v1alpha2"
+	runtime "k8s.io/cri-api/pkg/apis/runtime/v1"
 
 	cio "github.com/containerd/containerd/pkg/cri/io"
 	"github.com/containerd/containerd/pkg/cri/util"
@@ -164,14 +164,14 @@ func (c *criService) execInternal(ctx context.Context, container containerd.Cont
 		}
 		// Wait for the process to be killed.
 		exitRes := <-exitCh
-		log.G(ctx).Infof("Timeout received while waiting for exec process kill %q code %d and error %v",
+		log.G(ctx).Debugf("Timeout received while waiting for exec process kill %q code %d and error %v",
 			execID, exitRes.ExitCode(), exitRes.Error())
 		<-attachDone
 		log.G(ctx).Debugf("Stream pipe for exec process %q done", execID)
 		return nil, errors.Wrapf(execCtx.Err(), "timeout %v exceeded", opts.timeout)
 	case exitRes := <-exitCh:
 		code, _, err := exitRes.Result()
-		log.G(ctx).Infof("Exec process %q exits with exit code %d and error %v", execID, code, err)
+		log.G(ctx).Debugf("Exec process %q exits with exit code %d and error %v", execID, code, err)
 		if err != nil {
 			return nil, errors.Wrapf(err, "failed while waiting for exec %q", execID)
 		}

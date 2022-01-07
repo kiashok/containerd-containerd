@@ -1,4 +1,5 @@
-// +build linux,!no_btrfs
+//go:build linux && !no_btrfs && cgo
+// +build linux,!no_btrfs,cgo
 
 /*
    Copyright The containerd Authors.
@@ -50,11 +51,15 @@ type snapshotter struct {
 // root needs to be a mount point of btrfs.
 func NewSnapshotter(root string) (snapshots.Snapshotter, error) {
 	// If directory does not exist, create it
-	if _, err := os.Stat(root); err != nil {
+	if st, err := os.Stat(root); err != nil {
 		if !os.IsNotExist(err) {
 			return nil, err
 		}
-		if err := os.Mkdir(root, 0755); err != nil {
+		if err := os.Mkdir(root, 0700); err != nil {
+			return nil, err
+		}
+	} else if st.Mode()&os.ModePerm != 0700 {
+		if err := os.Chmod(root, 0700); err != nil {
 			return nil, err
 		}
 	}

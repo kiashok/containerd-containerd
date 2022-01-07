@@ -1,3 +1,4 @@
+//go:build linux
 // +build linux
 
 /*
@@ -103,4 +104,17 @@ Copyright 2009-2018 Canonical Ltd.
 			t.Fatalf("expected version to be %d, was %d, for: %#v\n", v.version, version, v)
 		}
 	}
+}
+
+func TestDumpDefaultProfile(t *testing.T) {
+	if _, err := getVersion(); err != nil {
+		t.Skipf("AppArmor not available: %+v", err)
+	}
+	name := "test-dump-default-profile"
+	prof, err := DumpDefaultProfile(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("Generated profile %q", name)
+	t.Log(prof)
 }

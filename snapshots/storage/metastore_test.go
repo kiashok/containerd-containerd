@@ -19,7 +19,6 @@ package storage
 import (
 	"context"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"testing"
 	"time"
@@ -67,7 +66,7 @@ func MetaStoreSuite(t *testing.T, name string, meta func(root string) (*MetaStor
 func makeTest(t *testing.T, name string, metaFn metaFactory, fn testFunc) func(t *testing.T) {
 	return func(t *testing.T) {
 		ctx := context.Background()
-		tmpDir, err := ioutil.TempDir("", "metastore-test-"+name+"-")
+		tmpDir, err := os.MkdirTemp("", "metastore-test-"+name+"-")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -274,7 +273,7 @@ func testWalk(ctx context.Context, t *testing.T, _ *MetaStore) {
 	found := map[string]snapshots.Info{}
 	err := WalkInfo(ctx, func(ctx context.Context, info snapshots.Info) error {
 		if _, ok := found[info.Name]; ok {
-			return errors.Errorf("entry already encountered")
+			return errors.New("entry already encountered")
 		}
 		found[info.Name] = info
 		return nil

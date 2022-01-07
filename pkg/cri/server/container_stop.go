@@ -17,24 +17,25 @@
 package server
 
 import (
+	"sync/atomic"
 	"syscall"
 	"time"
 
-	"github.com/containerd/containerd"
 	eventtypes "github.com/containerd/containerd/api/events"
 	"github.com/containerd/containerd/errdefs"
 	"github.com/containerd/containerd/log"
-	"github.com/pkg/errors"
-	"golang.org/x/net/context"
-	runtime "k8s.io/cri-api/pkg/apis/runtime/v1alpha2"
-
-	"github.com/containerd/containerd/pkg/cri/store"
 	containerstore "github.com/containerd/containerd/pkg/cri/store/container"
 	ctrdutil "github.com/containerd/containerd/pkg/cri/util"
+
+	"github.com/moby/sys/signal"
+	"github.com/pkg/errors"
+	"golang.org/x/net/context"
+	runtime "k8s.io/cri-api/pkg/apis/runtime/v1"
 )
 
 // StopContainer stops a running container with a grace period (i.e., timeout).
 func (c *criService) StopContainer(ctx context.Context, r *runtime.StopContainerRequest) (*runtime.StopContainerResponse, error) {
+	start := time.Now()
 	// Get container config from container store.
 	container, err := c.containerStore.Get(r.GetContainerId())
 	if err != nil {
@@ -44,6 +45,13 @@ func (c *criService) StopContainer(ctx context.Context, r *runtime.StopContainer
 	if err := c.stopContainer(ctx, container, time.Duration(r.GetTimeout())*time.Second); err != nil {
 		return nil, err
 	}
+
+	i, err := container.Container.Info(ctx)
+	if err != nil {
+		return nil, errors.Wrap(err, "get container info")
+	}
+
+	containerStopTimer.WithValues(i.Runtime.Name).UpdateSince(start)
 
 	return &runtime.StopContainerResponse{}, nil
 }
@@ -88,7 +96,7 @@ func (c *criService) stopContainer(ctx context.Context, container containerstore
 		}
 
 		exitCtx, exitCancel := context.WithCancel(context.Background())
-		stopCh := c.eventMonitor.startExitMonitor(exitCtx, id, task.Pid(), exitCh)
+		stopCh := c.eventMonitor.startContainerExitMonitor(exitCtx, id, task.Pid(), exitCh)
 		defer func() {
 			exitCancel()
 			// This ensures that exit monitor is stopped before
@@ -115,7 +123,7 @@ func (c *criService) stopContainer(ctx context.Context, container containerstore
 			// TODO(random-liu): Remove this logic when containerd 1.2 is deprecated.
 			image, err := c.imageStore.Get(container.ImageRef)
 			if err != nil {
-				if err != store.ErrNotExist {
+				if !errdefs.IsNotFound(err) {
 					return errors.Wrapf(err, "failed to get image %q", container.ImageRef)
 				}
 				log.G(ctx).Warningf("Image %q not found, stop container with signal %q", container.ImageRef, stopSignal)
@@ -125,13 +133,26 @@ func (c *criService) stopContainer(ctx context.Context, container containerstore
 				}
 			}
 		}
-		sig, err := containerd.ParseSignal(stopSignal)
+		sig, err := signal.ParseSignal(stopSignal)
 		if err != nil {
 			return errors.Wrapf(err, "failed to parse stop signal %q", stopSignal)
 		}
-		log.G(ctx).Infof("Stop container %q with signal %v", id, sig)
-		if err = task.Kill(ctx, sig); err != nil && !errdefs.IsNotFound(err) {
-			return errors.Wrapf(err, "failed to stop container %q", id)
+
+		var sswt bool
+		if container.IsStopSignaledWithTimeout == nil {
+			log.G(ctx).Infof("unable to ensure stop signal %v was not sent twice to container %v", sig, id)
+			sswt = true
+		} else {
+			sswt = atomic.CompareAndSwapUint32(container.IsStopSignaledWithTimeout, 0, 1)
+		}
+
+		if sswt {
+			log.G(ctx).Infof("Stop container %q with signal %v", id, sig)
+			if err = task.Kill(ctx, sig); err != nil && !errdefs.IsNotFound(err) {
+				return errors.Wrapf(err, "failed to stop container %q", id)
+			}
+		} else {
+			log.G(ctx).Infof("Skipping the sending of signal %v to container %q because a prior stop with timeout>0 request already sent the signal", sig, id)
 		}
 
 		sigTermCtx, sigTermCtxCancel := context.WithTimeout(ctx, timeout)

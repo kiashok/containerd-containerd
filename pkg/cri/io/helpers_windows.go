@@ -1,5 +1,3 @@
-// +build windows
-
 /*
    Copyright The containerd Authors.
 
@@ -51,6 +49,10 @@ func openPipe(ctx context.Context, fn string, flag int, perm os.FileMode) (io.Re
 			return
 		}
 		p.con = c
+	}()
+	go func() {
+		<-ctx.Done()
+		p.Close()
 	}()
 	return p, nil
 }

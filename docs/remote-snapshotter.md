@@ -12,7 +12,7 @@ This enables containerd to lazily pull images from standard-compliant registries
 ## The containerd client API
 
 The containerd client's `Pull` API with unpacking-mode allows the underlying snapshotter to query for remote snapshots before fetching content.
-Remote snapshotter needs to be plugged into containerd in [the same ways as normal snapshotters](/PLUGINS.md).
+Remote snapshotter needs to be plugged into containerd in [the same ways as normal snapshotters](/docs/PLUGINS.md).
 
 ```go
 image, err := client.Pull(ctx, ref,
@@ -84,7 +84,7 @@ This is a containerd-defined label which contains ChainID that targets a committ
 At this moment, user-defined labels (prefixed by `containerd.io/snapshot/`) will also be merged into the labels option.
 
 ```go
-// Gets annotations appended to the targetting layer which would contain
+// Gets annotations appended to the targeting layer which would contain
 // snapshotter-specific information passed by the user.
 labels := snapshots.FilterInheritedLabels(desc.Annotations)
 if labels == nil {
@@ -98,7 +98,7 @@ labels["containerd.io/snapshot.ref"] = chainID
 // snapshotter-specific information passed by the user.
 opts := append(rCtx.SnapshotterOpts, snapshots.WithLabels(labels))
 
-// Calls `Prepare` API with target indentifier and snapshotter-specific
+// Calls `Prepare` API with target identifier and snapshotter-specific
 // information.
 mounts, err = sn.Prepare(ctx, key, parent.String(), opts...)
 ```

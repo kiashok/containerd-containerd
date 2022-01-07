@@ -19,6 +19,7 @@ package server
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/containerd/containerd"
@@ -29,11 +30,12 @@ import (
 	selinux "github.com/opencontainers/selinux/go-selinux"
 	"github.com/pkg/errors"
 	"golang.org/x/sys/unix"
-	runtime "k8s.io/cri-api/pkg/apis/runtime/v1alpha2"
+	runtime "k8s.io/cri-api/pkg/apis/runtime/v1"
 
 	"github.com/containerd/containerd/pkg/cri/annotations"
 	customopts "github.com/containerd/containerd/pkg/cri/opts"
 	osinterface "github.com/containerd/containerd/pkg/os"
+	"github.com/containerd/containerd/pkg/userns"
 )
 
 func (c *criService) sandboxContainerSpec(id string, config *runtime.PodSandboxConfig,
@@ -41,7 +43,7 @@ func (c *criService) sandboxContainerSpec(id string, config *runtime.PodSandboxC
 	// Creates a spec Generator with the default spec.
 	// TODO(random-liu): [P1] Compare the default settings with docker and containerd default.
 	specOpts := []oci.SpecOpts{
-		customopts.WithoutRunMount,
+		oci.WithoutRunMount,
 		customopts.WithoutDefaultSecuritySettings,
 		customopts.WithRelativeRoot(relativeRootfsPath),
 		oci.WithEnv(imageConfig.Env),
@@ -134,6 +136,19 @@ func (c *criService) sandboxContainerSpec(id string, config *runtime.PodSandboxC
 
 	// Add sysctls
 	sysctls := config.GetLinux().GetSysctls()
+	if sysctls == nil {
+		sysctls = make(map[string]string)
+	}
+	_, ipUnprivilegedPortStart := sysctls["net.ipv4.ip_unprivileged_port_start"]
+	_, pingGroupRange := sysctls["net.ipv4.ping_group_range"]
+	if nsOptions.GetNetwork() != runtime.NamespaceMode_NODE {
+		if c.config.EnableUnprivilegedPorts && !ipUnprivilegedPortStart {
+			sysctls["net.ipv4.ip_unprivileged_port_start"] = "0"
+		}
+		if c.config.EnableUnprivilegedICMP && !pingGroupRange && !userns.RunningInUserNS() {
+			sysctls["net.ipv4.ping_group_range"] = "0 2147483647"
+		}
+	}
 	specOpts = append(specOpts, customopts.WithSysctls(sysctls))
 
 	// Note: LinuxSandboxSecurityContext does not currently provide an apparmor profile
@@ -141,6 +156,15 @@ func (c *criService) sandboxContainerSpec(id string, config *runtime.PodSandboxC
 	if !c.config.DisableCgroup {
 		specOpts = append(specOpts, customopts.WithDefaultSandboxShares)
 	}
+
+	if res := config.GetLinux().GetResources(); res != nil {
+		specOpts = append(specOpts,
+			customopts.WithAnnotation(annotations.SandboxCPUPeriod, strconv.FormatInt(res.CpuPeriod, 10)),
+			customopts.WithAnnotation(annotations.SandboxCPUQuota, strconv.FormatInt(res.CpuQuota, 10)),
+			customopts.WithAnnotation(annotations.SandboxCPUShares, strconv.FormatInt(res.CpuShares, 10)),
+			customopts.WithAnnotation(annotations.SandboxMem, strconv.FormatInt(res.MemoryLimitInBytes, 10)))
+	}
+
 	specOpts = append(specOpts, customopts.WithPodOOMScoreAdj(int(defaultSandboxOOMAdj), c.config.RestrictOOMScoreAdj))
 
 	for pKey, pValue := range getPassthroughAnnotations(config.Annotations,
@@ -151,6 +175,8 @@ func (c *criService) sandboxContainerSpec(id string, config *runtime.PodSandboxC
 	specOpts = append(specOpts,
 		customopts.WithAnnotation(annotations.ContainerType, annotations.ContainerTypeSandbox),
 		customopts.WithAnnotation(annotations.SandboxID, id),
+		customopts.WithAnnotation(annotations.SandboxNamespace, config.GetMetadata().GetNamespace()),
+		customopts.WithAnnotation(annotations.SandboxName, config.GetMetadata().GetName()),
 		customopts.WithAnnotation(annotations.SandboxLogDir, config.GetLogDirectory()),
 	)
 
@@ -163,9 +189,19 @@ func (c *criService) sandboxContainerSpecOpts(config *runtime.PodSandboxConfig, 
 	var (
 		securityContext = config.GetLinux().GetSecurityContext()
 		specOpts        []oci.SpecOpts
+		err             error
 	)
+	ssp := securityContext.GetSeccomp()
+	if ssp == nil {
+		ssp, err = generateSeccompSecurityProfile(
+			securityContext.GetSeccompProfilePath(), //nolint:staticcheck // Deprecated but we don't want to remove yet
+			c.config.UnsetSeccompProfile)
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to generate seccomp spec opts")
+		}
+	}
 	seccompSpecOpts, err := c.generateSeccompSpecOpts(
-		securityContext.GetSeccompProfilePath(),
+		ssp,
 		securityContext.GetPrivileged(),
 		c.seccompEnabled())
 	if err != nil {
@@ -262,10 +298,6 @@ func (c *criService) setupSandboxFiles(id string, config *runtime.PodSandboxConf
 // if none option is specified, will return empty with no error.
 func parseDNSOptions(servers, searches, options []string) (string, error) {
 	resolvContent := ""
-
-	if len(searches) > maxDNSSearches {
-		return "", errors.Errorf("DNSOption.Searches has more than %d domains", maxDNSSearches)
-	}
 
 	if len(searches) > 0 {
 		resolvContent += fmt.Sprintf("search %s\n", strings.Join(searches, " "))

@@ -31,15 +31,14 @@ import (
 	"github.com/containerd/containerd/mount"
 	"github.com/containerd/containerd/oci"
 	imagespec "github.com/opencontainers/image-spec/specs-go/v1"
-	libcontainerconfigs "github.com/opencontainers/runc/libcontainer/configs"
-	"github.com/opencontainers/runc/libcontainer/devices"
 	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/opencontainers/selinux/go-selinux"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	runtime "k8s.io/cri-api/pkg/apis/runtime/v1alpha2"
+	runtime "k8s.io/cri-api/pkg/apis/runtime/v1"
 
+	"github.com/containerd/containerd/pkg/cap"
 	"github.com/containerd/containerd/pkg/cri/annotations"
 	"github.com/containerd/containerd/pkg/cri/config"
 	"github.com/containerd/containerd/pkg/cri/opts"
@@ -91,6 +90,7 @@ func getCreateContainerTestData() (*runtime.ContainerConfig, *runtime.PodSandbox
 				OomScoreAdj:        500,
 				CpusetCpus:         "0-1",
 				CpusetMems:         "2-3",
+				Unified:            map[string]string{"memory.min": "65536", "memory.swap.max": "1024"},
 			},
 			SecurityContext: &runtime.LinuxContainerSecurityContext{
 				SupplementalGroups: []int64{1111, 2222},
@@ -137,6 +137,7 @@ func getCreateContainerTestData() (*runtime.ContainerConfig, *runtime.PodSandbox
 		assert.EqualValues(t, *spec.Linux.Resources.CPU.Shares, 300)
 		assert.EqualValues(t, spec.Linux.Resources.CPU.Cpus, "0-1")
 		assert.EqualValues(t, spec.Linux.Resources.CPU.Mems, "2-3")
+		assert.EqualValues(t, spec.Linux.Resources.Unified, map[string]string{"memory.min": "65536", "memory.swap.max": "1024"})
 		assert.EqualValues(t, *spec.Linux.Resources.Memory.Limit, 400)
 		assert.EqualValues(t, *spec.Process.OOMScoreAdj, 500)
 
@@ -174,6 +175,15 @@ func getCreateContainerTestData() (*runtime.ContainerConfig, *runtime.PodSandbox
 
 		assert.Contains(t, spec.Annotations, annotations.ContainerType)
 		assert.EqualValues(t, spec.Annotations[annotations.ContainerType], annotations.ContainerTypeContainer)
+
+		assert.Contains(t, spec.Annotations, annotations.SandboxNamespace)
+		assert.EqualValues(t, spec.Annotations[annotations.SandboxNamespace], "test-sandbox-ns")
+
+		assert.Contains(t, spec.Annotations, annotations.SandboxName)
+		assert.EqualValues(t, spec.Annotations[annotations.SandboxName], "test-sandbox-name")
+
+		assert.Contains(t, spec.Annotations, annotations.ImageName)
+		assert.EqualValues(t, spec.Annotations[annotations.ImageName], testImageName)
 	}
 	return config, sandboxConfig, imageConfig, specCheck
 }
@@ -183,6 +193,7 @@ func TestContainerCapabilities(t *testing.T) {
 	testSandboxID := "sandbox-id"
 	testContainerName := "container-name"
 	testPid := uint32(1234)
+	allCaps := cap.Known()
 	for desc, test := range map[string]struct {
 		capability *runtime.Capability
 		includes   []string
@@ -200,20 +211,20 @@ func TestContainerCapabilities(t *testing.T) {
 			capability: &runtime.Capability{
 				AddCapabilities: []string{"ALL"},
 			},
-			includes: oci.GetAllCapabilities(),
+			includes: allCaps,
 		},
 		"should be able to drop all capabilities": {
 			capability: &runtime.Capability{
 				DropCapabilities: []string{"ALL"},
 			},
-			excludes: oci.GetAllCapabilities(),
+			excludes: allCaps,
 		},
 		"should be able to drop capabilities with add all": {
 			capability: &runtime.Capability{
 				AddCapabilities:  []string{"ALL"},
 				DropCapabilities: []string{"CHOWN"},
 			},
-			includes: util.SubtractStringSlice(oci.GetAllCapabilities(), "CAP_CHOWN"),
+			includes: util.SubtractStringSlice(allCaps, "CAP_CHOWN"),
 			excludes: []string{"CAP_CHOWN"},
 		},
 		"should be able to add capabilities with drop all": {
@@ -222,16 +233,17 @@ func TestContainerCapabilities(t *testing.T) {
 				DropCapabilities: []string{"ALL"},
 			},
 			includes: []string{"CAP_SYS_ADMIN"},
-			excludes: util.SubtractStringSlice(oci.GetAllCapabilities(), "CAP_SYS_ADMIN"),
+			excludes: util.SubtractStringSlice(allCaps, "CAP_SYS_ADMIN"),
 		},
 	} {
 		t.Logf("TestCase %q", desc)
 		containerConfig, sandboxConfig, imageConfig, specCheck := getCreateContainerTestData()
 		ociRuntime := config.Runtime{}
 		c := newTestCRIService()
+		c.allCaps = allCaps
 
 		containerConfig.Linux.SecurityContext.Capabilities = test.capability
-		spec, err := c.containerSpec(testID, testSandboxID, testPid, "", testContainerName, containerConfig, sandboxConfig, imageConfig, nil, ociRuntime)
+		spec, err := c.containerSpec(testID, testSandboxID, testPid, "", testContainerName, testImageName, containerConfig, sandboxConfig, imageConfig, nil, ociRuntime)
 		require.NoError(t, err)
 
 		if selinux.GetEnabled() {
@@ -266,7 +278,7 @@ func TestContainerSpecTty(t *testing.T) {
 	c := newTestCRIService()
 	for _, tty := range []bool{true, false} {
 		containerConfig.Tty = tty
-		spec, err := c.containerSpec(testID, testSandboxID, testPid, "", testContainerName, containerConfig, sandboxConfig, imageConfig, nil, ociRuntime)
+		spec, err := c.containerSpec(testID, testSandboxID, testPid, "", testContainerName, testImageName, containerConfig, sandboxConfig, imageConfig, nil, ociRuntime)
 		require.NoError(t, err)
 		specCheck(t, testID, testSandboxID, testPid, spec)
 		assert.Equal(t, tty, spec.Process.Terminal)
@@ -293,7 +305,7 @@ func TestContainerSpecDefaultPath(t *testing.T) {
 			imageConfig.Env = append(imageConfig.Env, pathenv)
 			expected = pathenv
 		}
-		spec, err := c.containerSpec(testID, testSandboxID, testPid, "", testContainerName, containerConfig, sandboxConfig, imageConfig, nil, ociRuntime)
+		spec, err := c.containerSpec(testID, testSandboxID, testPid, "", testContainerName, testImageName, containerConfig, sandboxConfig, imageConfig, nil, ociRuntime)
 		require.NoError(t, err)
 		specCheck(t, testID, testSandboxID, testPid, spec)
 		assert.Contains(t, spec.Process.Env, expected)
@@ -310,7 +322,7 @@ func TestContainerSpecReadonlyRootfs(t *testing.T) {
 	c := newTestCRIService()
 	for _, readonly := range []bool{true, false} {
 		containerConfig.Linux.SecurityContext.ReadonlyRootfs = readonly
-		spec, err := c.containerSpec(testID, testSandboxID, testPid, "", testContainerName, containerConfig, sandboxConfig, imageConfig, nil, ociRuntime)
+		spec, err := c.containerSpec(testID, testSandboxID, testPid, "", testContainerName, testImageName, containerConfig, sandboxConfig, imageConfig, nil, ociRuntime)
 		require.NoError(t, err)
 		specCheck(t, testID, testSandboxID, testPid, spec)
 		assert.Equal(t, readonly, spec.Root.Readonly)
@@ -349,7 +361,7 @@ func TestContainerSpecWithExtraMounts(t *testing.T) {
 			Readonly:      false,
 		},
 	}
-	spec, err := c.containerSpec(testID, testSandboxID, testPid, "", testContainerName, containerConfig, sandboxConfig, imageConfig, extraMounts, ociRuntime)
+	spec, err := c.containerSpec(testID, testSandboxID, testPid, "", testContainerName, testImageName, containerConfig, sandboxConfig, imageConfig, extraMounts, ociRuntime)
 	require.NoError(t, err)
 	specCheck(t, testID, testSandboxID, testPid, spec)
 	var mounts, sysMounts, devMounts []runtimespec.Mount
@@ -417,7 +429,7 @@ func TestContainerAndSandboxPrivileged(t *testing.T) {
 		sandboxConfig.Linux.SecurityContext = &runtime.LinuxSandboxSecurityContext{
 			Privileged: test.sandboxPrivileged,
 		}
-		_, err := c.containerSpec(testID, testSandboxID, testPid, "", testContainerName, containerConfig, sandboxConfig, imageConfig, nil, ociRuntime)
+		_, err := c.containerSpec(testID, testSandboxID, testPid, "", testContainerName, testImageName, containerConfig, sandboxConfig, imageConfig, nil, ociRuntime)
 		if test.expectError {
 			assert.Error(t, err)
 		} else {
@@ -440,24 +452,28 @@ func TestContainerMounts(t *testing.T) {
 			},
 			expectedMounts: []*runtime.Mount{
 				{
-					ContainerPath: "/etc/hostname",
-					HostPath:      filepath.Join(testRootDir, sandboxesDir, testSandboxID, "hostname"),
-					Readonly:      true,
+					ContainerPath:  "/etc/hostname",
+					HostPath:       filepath.Join(testRootDir, sandboxesDir, testSandboxID, "hostname"),
+					Readonly:       true,
+					SelinuxRelabel: true,
 				},
 				{
-					ContainerPath: "/etc/hosts",
-					HostPath:      filepath.Join(testRootDir, sandboxesDir, testSandboxID, "hosts"),
-					Readonly:      true,
+					ContainerPath:  "/etc/hosts",
+					HostPath:       filepath.Join(testRootDir, sandboxesDir, testSandboxID, "hosts"),
+					Readonly:       true,
+					SelinuxRelabel: true,
 				},
 				{
-					ContainerPath: resolvConfPath,
-					HostPath:      filepath.Join(testRootDir, sandboxesDir, testSandboxID, "resolv.conf"),
-					Readonly:      true,
+					ContainerPath:  resolvConfPath,
+					HostPath:       filepath.Join(testRootDir, sandboxesDir, testSandboxID, "resolv.conf"),
+					Readonly:       true,
+					SelinuxRelabel: true,
 				},
 				{
-					ContainerPath: "/dev/shm",
-					HostPath:      filepath.Join(testStateDir, sandboxesDir, testSandboxID, "shm"),
-					Readonly:      false,
+					ContainerPath:  "/dev/shm",
+					HostPath:       filepath.Join(testStateDir, sandboxesDir, testSandboxID, "shm"),
+					Readonly:       false,
+					SelinuxRelabel: true,
 				},
 			},
 		},
@@ -465,24 +481,28 @@ func TestContainerMounts(t *testing.T) {
 			securityContext: &runtime.LinuxContainerSecurityContext{},
 			expectedMounts: []*runtime.Mount{
 				{
-					ContainerPath: "/etc/hostname",
-					HostPath:      filepath.Join(testRootDir, sandboxesDir, testSandboxID, "hostname"),
-					Readonly:      false,
+					ContainerPath:  "/etc/hostname",
+					HostPath:       filepath.Join(testRootDir, sandboxesDir, testSandboxID, "hostname"),
+					Readonly:       false,
+					SelinuxRelabel: true,
 				},
 				{
-					ContainerPath: "/etc/hosts",
-					HostPath:      filepath.Join(testRootDir, sandboxesDir, testSandboxID, "hosts"),
-					Readonly:      false,
+					ContainerPath:  "/etc/hosts",
+					HostPath:       filepath.Join(testRootDir, sandboxesDir, testSandboxID, "hosts"),
+					Readonly:       false,
+					SelinuxRelabel: true,
 				},
 				{
-					ContainerPath: resolvConfPath,
-					HostPath:      filepath.Join(testRootDir, sandboxesDir, testSandboxID, "resolv.conf"),
-					Readonly:      false,
+					ContainerPath:  resolvConfPath,
+					HostPath:       filepath.Join(testRootDir, sandboxesDir, testSandboxID, "resolv.conf"),
+					Readonly:       false,
+					SelinuxRelabel: true,
 				},
 				{
-					ContainerPath: "/dev/shm",
-					HostPath:      filepath.Join(testStateDir, sandboxesDir, testSandboxID, "shm"),
-					Readonly:      false,
+					ContainerPath:  "/dev/shm",
+					HostPath:       filepath.Join(testStateDir, sandboxesDir, testSandboxID, "shm"),
+					Readonly:       false,
+					SelinuxRelabel: true,
 				},
 			},
 		},
@@ -492,19 +512,22 @@ func TestContainerMounts(t *testing.T) {
 			},
 			expectedMounts: []*runtime.Mount{
 				{
-					ContainerPath: "/etc/hostname",
-					HostPath:      filepath.Join(testRootDir, sandboxesDir, testSandboxID, "hostname"),
-					Readonly:      false,
+					ContainerPath:  "/etc/hostname",
+					HostPath:       filepath.Join(testRootDir, sandboxesDir, testSandboxID, "hostname"),
+					Readonly:       false,
+					SelinuxRelabel: true,
 				},
 				{
-					ContainerPath: "/etc/hosts",
-					HostPath:      filepath.Join(testRootDir, sandboxesDir, testSandboxID, "hosts"),
-					Readonly:      false,
+					ContainerPath:  "/etc/hosts",
+					HostPath:       filepath.Join(testRootDir, sandboxesDir, testSandboxID, "hosts"),
+					Readonly:       false,
+					SelinuxRelabel: true,
 				},
 				{
-					ContainerPath: resolvConfPath,
-					HostPath:      filepath.Join(testRootDir, sandboxesDir, testSandboxID, "resolv.conf"),
-					Readonly:      false,
+					ContainerPath:  resolvConfPath,
+					HostPath:       filepath.Join(testRootDir, sandboxesDir, testSandboxID, "resolv.conf"),
+					Readonly:       false,
+					SelinuxRelabel: true,
 				},
 				{
 					ContainerPath: "/dev/shm",
@@ -543,19 +566,22 @@ func TestContainerMounts(t *testing.T) {
 			securityContext: &runtime.LinuxContainerSecurityContext{},
 			expectedMounts: []*runtime.Mount{
 				{
-					ContainerPath: "/etc/hosts",
-					HostPath:      filepath.Join(testRootDir, sandboxesDir, testSandboxID, "hosts"),
-					Readonly:      false,
+					ContainerPath:  "/etc/hosts",
+					HostPath:       filepath.Join(testRootDir, sandboxesDir, testSandboxID, "hosts"),
+					Readonly:       false,
+					SelinuxRelabel: true,
 				},
 				{
-					ContainerPath: resolvConfPath,
-					HostPath:      filepath.Join(testRootDir, sandboxesDir, testSandboxID, "resolv.conf"),
-					Readonly:      false,
+					ContainerPath:  resolvConfPath,
+					HostPath:       filepath.Join(testRootDir, sandboxesDir, testSandboxID, "resolv.conf"),
+					Readonly:       false,
+					SelinuxRelabel: true,
 				},
 				{
-					ContainerPath: "/dev/shm",
-					HostPath:      filepath.Join(testStateDir, sandboxesDir, testSandboxID, "shm"),
-					Readonly:      false,
+					ContainerPath:  "/dev/shm",
+					HostPath:       filepath.Join(testStateDir, sandboxesDir, testSandboxID, "shm"),
+					Readonly:       false,
+					SelinuxRelabel: true,
 				},
 			},
 		},
@@ -605,7 +631,7 @@ func TestPrivilegedBindMount(t *testing.T) {
 		containerConfig.Linux.SecurityContext.Privileged = test.privileged
 		sandboxConfig.Linux.SecurityContext.Privileged = test.privileged
 
-		spec, err := c.containerSpec(t.Name(), testSandboxID, testPid, "", testContainerName, containerConfig, sandboxConfig, imageConfig, nil, ociRuntime)
+		spec, err := c.containerSpec(t.Name(), testSandboxID, testPid, "", testContainerName, testImageName, containerConfig, sandboxConfig, imageConfig, nil, ociRuntime)
 
 		assert.NoError(t, err)
 		if test.expectedSysFSRO {
@@ -762,7 +788,7 @@ func TestPidNamespace(t *testing.T) {
 	} {
 		t.Logf("TestCase %q", desc)
 		containerConfig.Linux.SecurityContext.NamespaceOptions = &runtime.NamespaceOption{Pid: test.pidNS}
-		spec, err := c.containerSpec(testID, testSandboxID, testPid, "", testContainerName, containerConfig, sandboxConfig, imageConfig, nil, ociRuntime)
+		spec, err := c.containerSpec(testID, testSandboxID, testPid, "", testContainerName, testImageName, containerConfig, sandboxConfig, imageConfig, nil, ociRuntime)
 		require.NoError(t, err)
 		assert.Contains(t, spec.Linux.Namespaces, test.expected)
 	}
@@ -777,14 +803,14 @@ func TestNoDefaultRunMount(t *testing.T) {
 	ociRuntime := config.Runtime{}
 	c := newTestCRIService()
 
-	spec, err := c.containerSpec(testID, testSandboxID, testPid, "", testContainerName, containerConfig, sandboxConfig, imageConfig, nil, ociRuntime)
+	spec, err := c.containerSpec(testID, testSandboxID, testPid, "", testContainerName, testImageName, containerConfig, sandboxConfig, imageConfig, nil, ociRuntime)
 	assert.NoError(t, err)
 	for _, mount := range spec.Mounts {
 		assert.NotEqual(t, "/run", mount.Destination)
 	}
 }
 
-func TestGenerateSeccompSpecOpts(t *testing.T) {
+func TestGenerateSeccompSecurityProfileSpecOpts(t *testing.T) {
 	for desc, test := range map[string]struct {
 		profile        string
 		privileged     bool
@@ -792,6 +818,7 @@ func TestGenerateSeccompSpecOpts(t *testing.T) {
 		specOpts       oci.SpecOpts
 		expectErr      bool
 		defaultProfile string
+		sp             *runtime.SecurityProfile
 	}{
 		"should return error if seccomp is specified when seccomp is not supported": {
 			profile:   runtimeDefault,
@@ -828,10 +855,6 @@ func TestGenerateSeccompSpecOpts(t *testing.T) {
 			profile:  profileNamePrefix + "test-profile",
 			specOpts: seccomp.WithProfile("test-profile"),
 		},
-		"should return error if specified profile is invalid": {
-			profile:   "test-profile",
-			expectErr: true,
-		},
 		"should use default profile when seccomp is empty": {
 			defaultProfile: profileNamePrefix + "test-profile",
 			specOpts:       seccomp.WithProfile("test-profile"),
@@ -840,18 +863,88 @@ func TestGenerateSeccompSpecOpts(t *testing.T) {
 			defaultProfile: runtimeDefault,
 			specOpts:       seccomp.WithDefaultProfile(),
 		},
+		//-----------------------------------------------
+		// now buckets for the SecurityProfile variants
+		//-----------------------------------------------
+		"sp should return error if seccomp is specified when seccomp is not supported": {
+			disable:   true,
+			expectErr: true,
+			sp: &runtime.SecurityProfile{
+				ProfileType: runtime.SecurityProfile_RuntimeDefault,
+			},
+		},
+		"sp should not return error if seccomp is unconfined when seccomp is not supported": {
+			disable: true,
+			sp: &runtime.SecurityProfile{
+				ProfileType: runtime.SecurityProfile_Unconfined,
+			},
+		},
+		"sp should not set seccomp when privileged is true": {
+			privileged: true,
+			sp: &runtime.SecurityProfile{
+				ProfileType: runtime.SecurityProfile_RuntimeDefault,
+			},
+		},
+		"sp should not set seccomp when seccomp is unconfined": {
+			sp: &runtime.SecurityProfile{
+				ProfileType: runtime.SecurityProfile_Unconfined,
+			},
+		},
+		"sp should not set seccomp when seccomp is not specified": {},
+		"sp should set default seccomp when seccomp is runtime/default": {
+			specOpts: seccomp.WithDefaultProfile(),
+			sp: &runtime.SecurityProfile{
+				ProfileType: runtime.SecurityProfile_RuntimeDefault,
+			},
+		},
+		"sp should set specified profile when local profile is specified": {
+			specOpts: seccomp.WithProfile("test-profile"),
+			sp: &runtime.SecurityProfile{
+				ProfileType:  runtime.SecurityProfile_Localhost,
+				LocalhostRef: profileNamePrefix + "test-profile",
+			},
+		},
+		"sp should set specified profile when local profile is specified even without prefix": {
+			specOpts: seccomp.WithProfile("test-profile"),
+			sp: &runtime.SecurityProfile{
+				ProfileType:  runtime.SecurityProfile_Localhost,
+				LocalhostRef: "test-profile",
+			},
+		},
+		"sp should return error if specified profile is invalid": {
+			expectErr: true,
+			sp: &runtime.SecurityProfile{
+				ProfileType:  runtime.SecurityProfile_RuntimeDefault,
+				LocalhostRef: "test-profile",
+			},
+		},
 	} {
 		t.Run(fmt.Sprintf("TestCase %q", desc), func(t *testing.T) {
 			cri := &criService{}
 			cri.config.UnsetSeccompProfile = test.defaultProfile
-			specOpts, err := cri.generateSeccompSpecOpts(test.profile, test.privileged, !test.disable)
-			assert.Equal(t,
-				reflect.ValueOf(test.specOpts).Pointer(),
-				reflect.ValueOf(specOpts).Pointer())
-			if test.expectErr {
-				assert.Error(t, err)
+			ssp := test.sp
+			csp, err := generateSeccompSecurityProfile(
+				test.profile,
+				test.defaultProfile)
+			if err != nil {
+				if test.expectErr {
+					assert.Error(t, err)
+				} else {
+					assert.NoError(t, err)
+				}
 			} else {
-				assert.NoError(t, err)
+				if ssp == nil {
+					ssp = csp
+				}
+				specOpts, err := cri.generateSeccompSpecOpts(ssp, test.privileged, !test.disable)
+				assert.Equal(t,
+					reflect.ValueOf(test.specOpts).Pointer(),
+					reflect.ValueOf(specOpts).Pointer())
+				if test.expectErr {
+					assert.Error(t, err)
+				} else {
+					assert.NoError(t, err)
+				}
 			}
 		})
 	}
@@ -864,6 +957,7 @@ func TestGenerateApparmorSpecOpts(t *testing.T) {
 		disable    bool
 		specOpts   oci.SpecOpts
 		expectErr  bool
+		sp         *runtime.SecurityProfile
 	}{
 		"should return error if apparmor is specified when apparmor is not supported": {
 			profile:   runtimeDefault,
@@ -915,16 +1009,91 @@ func TestGenerateApparmorSpecOpts(t *testing.T) {
 			profile:   "test-profile",
 			expectErr: true,
 		},
+		//--------------------------------------
+		// buckets for SecurityProfile struct
+		//--------------------------------------
+		"sp should return error if apparmor is specified when apparmor is not supported": {
+			disable:   true,
+			expectErr: true,
+			sp: &runtime.SecurityProfile{
+				ProfileType: runtime.SecurityProfile_RuntimeDefault,
+			},
+		},
+		"sp should not return error if apparmor is unconfined when apparmor is not supported": {
+			disable: true,
+			sp: &runtime.SecurityProfile{
+				ProfileType: runtime.SecurityProfile_Unconfined,
+			},
+		},
+		"sp should not apparmor when apparmor is unconfined": {
+			sp: &runtime.SecurityProfile{
+				ProfileType: runtime.SecurityProfile_Unconfined,
+			},
+		},
+		"sp should not apparmor when apparmor is unconfined and privileged is true": {
+			privileged: true,
+			sp: &runtime.SecurityProfile{
+				ProfileType: runtime.SecurityProfile_Unconfined,
+			},
+		},
+		"sp should set default apparmor when apparmor is runtime/default": {
+			specOpts: apparmor.WithDefaultProfile(appArmorDefaultProfileName),
+			sp: &runtime.SecurityProfile{
+				ProfileType: runtime.SecurityProfile_RuntimeDefault,
+			},
+		},
+		"sp should not apparmor when apparmor is default and privileged is true": {
+			privileged: true,
+			sp: &runtime.SecurityProfile{
+				ProfileType: runtime.SecurityProfile_RuntimeDefault,
+			},
+		},
+		"sp should return error when undefined local profile is specified": {
+			expectErr: true,
+			sp: &runtime.SecurityProfile{
+				ProfileType:  runtime.SecurityProfile_Localhost,
+				LocalhostRef: profileNamePrefix + "test-profile",
+			},
+		},
+		"sp should return error when undefined local profile is specified even without prefix": {
+			profile:   profileNamePrefix + "test-profile",
+			expectErr: true,
+			sp: &runtime.SecurityProfile{
+				ProfileType:  runtime.SecurityProfile_Localhost,
+				LocalhostRef: "test-profile",
+			},
+		},
+		"sp should return error when undefined local profile is specified and privileged is true": {
+			privileged: true,
+			expectErr:  true,
+			sp: &runtime.SecurityProfile{
+				ProfileType:  runtime.SecurityProfile_Localhost,
+				LocalhostRef: profileNamePrefix + "test-profile",
+			},
+		},
 	} {
 		t.Logf("TestCase %q", desc)
-		specOpts, err := generateApparmorSpecOpts(test.profile, test.privileged, !test.disable)
-		assert.Equal(t,
-			reflect.ValueOf(test.specOpts).Pointer(),
-			reflect.ValueOf(specOpts).Pointer())
-		if test.expectErr {
-			assert.Error(t, err)
+		asp := test.sp
+		csp, err := generateApparmorSecurityProfile(test.profile)
+		if err != nil {
+			if test.expectErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
 		} else {
-			assert.NoError(t, err)
+			if asp == nil {
+				asp = csp
+			}
+			specOpts, err := generateApparmorSpecOpts(asp, test.privileged, !test.disable)
+			assert.Equal(t,
+				reflect.ValueOf(test.specOpts).Pointer(),
+				reflect.ValueOf(specOpts).Pointer())
+			if test.expectErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
 		}
 	}
 }
@@ -961,8 +1130,8 @@ func TestMaskedAndReadonlyPaths(t *testing.T) {
 			disableProcMount: false,
 			masked:           nil,
 			readonly:         nil,
-			expectedMasked:   defaultSpec.Linux.MaskedPaths,
-			expectedReadonly: defaultSpec.Linux.ReadonlyPaths,
+			expectedMasked:   []string{},
+			expectedReadonly: []string{},
 			privileged:       false,
 		},
 		"should be able to specify empty paths": {
@@ -1007,7 +1176,7 @@ func TestMaskedAndReadonlyPaths(t *testing.T) {
 		sandboxConfig.Linux.SecurityContext = &runtime.LinuxSandboxSecurityContext{
 			Privileged: test.privileged,
 		}
-		spec, err := c.containerSpec(testID, testSandboxID, testPid, "", testContainerName, containerConfig, sandboxConfig, imageConfig, nil, ociRuntime)
+		spec, err := c.containerSpec(testID, testSandboxID, testPid, "", testContainerName, testImageName, containerConfig, sandboxConfig, imageConfig, nil, ociRuntime)
 		require.NoError(t, err)
 		if !test.privileged { // specCheck presumes an unprivileged container
 			specCheck(t, testID, testSandboxID, testPid, spec)
@@ -1054,7 +1223,7 @@ func TestHostname(t *testing.T) {
 		sandboxConfig.Linux.SecurityContext = &runtime.LinuxSandboxSecurityContext{
 			NamespaceOptions: &runtime.NamespaceOption{Network: test.networkNs},
 		}
-		spec, err := c.containerSpec(testID, testSandboxID, testPid, "", testContainerName, containerConfig, sandboxConfig, imageConfig, nil, ociRuntime)
+		spec, err := c.containerSpec(testID, testSandboxID, testPid, "", testContainerName, testImageName, containerConfig, sandboxConfig, imageConfig, nil, ociRuntime)
 		require.NoError(t, err)
 		specCheck(t, testID, testSandboxID, testPid, spec)
 		assert.Contains(t, spec.Process.Env, test.expectedEnv)
@@ -1066,7 +1235,7 @@ func TestDisableCgroup(t *testing.T) {
 	ociRuntime := config.Runtime{}
 	c := newTestCRIService()
 	c.config.DisableCgroup = true
-	spec, err := c.containerSpec("test-id", "sandbox-id", 1234, "", "container-name", containerConfig, sandboxConfig, imageConfig, nil, ociRuntime)
+	spec, err := c.containerSpec("test-id", "sandbox-id", 1234, "", "container-name", testImageName, containerConfig, sandboxConfig, imageConfig, nil, ociRuntime)
 	require.NoError(t, err)
 
 	t.Log("resource limit should not be set")
@@ -1148,6 +1317,72 @@ func TestGenerateUserString(t *testing.T) {
 	}
 }
 
+func TestNonRootUserAndDevices(t *testing.T) {
+	testPid := uint32(1234)
+	c := newTestCRIService()
+	testSandboxID := "sandbox-id"
+	testContainerName := "container-name"
+	containerConfig, sandboxConfig, imageConfig, _ := getCreateContainerTestData()
+
+	hostDevicesRaw, err := oci.HostDevices()
+	assert.NoError(t, err)
+
+	testDevice := hostDevicesRaw[0]
+
+	for desc, test := range map[string]struct {
+		uid, gid                           *runtime.Int64Value
+		deviceOwnershipFromSecurityContext bool
+		expectedDeviceUID                  uint32
+		expectedDeviceGID                  uint32
+	}{
+		"expect non-root container's Devices Uid/Gid to be the same as the device Uid/Gid on the host when deviceOwnershipFromSecurityContext is disabled": {
+			uid:               &runtime.Int64Value{Value: 1},
+			gid:               &runtime.Int64Value{Value: 10},
+			expectedDeviceUID: *testDevice.UID,
+			expectedDeviceGID: *testDevice.GID,
+		},
+		"expect root container's Devices Uid/Gid to be the same as the device Uid/Gid on the host when deviceOwnershipFromSecurityContext is disabled": {
+			uid:               &runtime.Int64Value{Value: 0},
+			gid:               &runtime.Int64Value{Value: 0},
+			expectedDeviceUID: *testDevice.UID,
+			expectedDeviceGID: *testDevice.GID,
+		},
+		"expect non-root container's Devices Uid/Gid to be the same as RunAsUser/RunAsGroup when deviceOwnershipFromSecurityContext is enabled": {
+			uid:                                &runtime.Int64Value{Value: 1},
+			gid:                                &runtime.Int64Value{Value: 10},
+			deviceOwnershipFromSecurityContext: true,
+			expectedDeviceUID:                  1,
+			expectedDeviceGID:                  10,
+		},
+		"expect root container's Devices Uid/Gid to be the same as the device Uid/Gid on the host when deviceOwnershipFromSecurityContext is enabled": {
+			uid:                                &runtime.Int64Value{Value: 0},
+			gid:                                &runtime.Int64Value{Value: 0},
+			deviceOwnershipFromSecurityContext: true,
+			expectedDeviceUID:                  *testDevice.UID,
+			expectedDeviceGID:                  *testDevice.GID,
+		},
+	} {
+		t.Logf("TestCase %q", desc)
+
+		c.config.DeviceOwnershipFromSecurityContext = test.deviceOwnershipFromSecurityContext
+		containerConfig.Linux.SecurityContext.RunAsUser = test.uid
+		containerConfig.Linux.SecurityContext.RunAsGroup = test.gid
+		containerConfig.Devices = []*runtime.Device{
+			{
+				ContainerPath: testDevice.Path,
+				HostPath:      testDevice.Path,
+				Permissions:   "r",
+			},
+		}
+
+		spec, err := c.containerSpec(t.Name(), testSandboxID, testPid, "", testContainerName, testImageName, containerConfig, sandboxConfig, imageConfig, nil, config.Runtime{})
+		assert.NoError(t, err)
+
+		assert.Equal(t, test.expectedDeviceUID, *spec.Linux.Devices[0].UID)
+		assert.Equal(t, test.expectedDeviceGID, *spec.Linux.Devices[0].GID)
+	}
+}
+
 func TestPrivilegedDevices(t *testing.T) {
 	testPid := uint32(1234)
 	c := newTestCRIService()
@@ -1189,16 +1424,16 @@ func TestPrivilegedDevices(t *testing.T) {
 		ociRuntime := config.Runtime{
 			PrivilegedWithoutHostDevices: test.privilegedWithoutHostDevices,
 		}
-		spec, err := c.containerSpec(t.Name(), testSandboxID, testPid, "", testContainerName, containerConfig, sandboxConfig, imageConfig, nil, ociRuntime)
+		spec, err := c.containerSpec(t.Name(), testSandboxID, testPid, "", testContainerName, testImageName, containerConfig, sandboxConfig, imageConfig, nil, ociRuntime)
 		assert.NoError(t, err)
 
-		hostDevicesRaw, err := devices.HostDevices()
+		hostDevicesRaw, err := oci.HostDevices()
 		assert.NoError(t, err)
-		var hostDevices []*libcontainerconfigs.Device
+		var hostDevices = make([]string, 0)
 		for _, dev := range hostDevicesRaw {
 			// https://github.com/containerd/cri/pull/1521#issuecomment-652807951
-			if dev.DeviceRule.Major != 0 {
-				hostDevices = append(hostDevices, dev)
+			if dev.Major != 0 {
+				hostDevices = append(hostDevices, dev.Path)
 			}
 		}
 
@@ -1238,7 +1473,7 @@ func TestBaseOCISpec(t *testing.T) {
 	testPid := uint32(1234)
 	containerConfig, sandboxConfig, imageConfig, specCheck := getCreateContainerTestData()
 
-	spec, err := c.containerSpec(testID, testSandboxID, testPid, "", testContainerName, containerConfig, sandboxConfig, imageConfig, nil, ociRuntime)
+	spec, err := c.containerSpec(testID, testSandboxID, testPid, "", testContainerName, testImageName, containerConfig, sandboxConfig, imageConfig, nil, ociRuntime)
 	assert.NoError(t, err)
 
 	specCheck(t, testID, testSandboxID, testPid, spec)

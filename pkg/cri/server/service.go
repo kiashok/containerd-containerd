@@ -23,6 +23,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/containerd/containerd"
@@ -33,7 +34,8 @@ import (
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
-	runtime "k8s.io/cri-api/pkg/apis/runtime/v1alpha2"
+	runtime "k8s.io/cri-api/pkg/apis/runtime/v1"
+	runtime_alpha "k8s.io/cri-api/pkg/apis/runtime/v1alpha2"
 
 	"github.com/containerd/containerd/pkg/cri/store/label"
 
@@ -48,10 +50,18 @@ import (
 	"github.com/containerd/containerd/pkg/registrar"
 )
 
+// defaultNetworkPlugin is used for the default CNI configuration
+const defaultNetworkPlugin = "default"
+
 // grpcServices are all the grpc services provided by cri containerd.
 type grpcServices interface {
 	runtime.RuntimeServiceServer
 	runtime.ImageServiceServer
+}
+
+type grpcAlphaServices interface {
+	runtime_alpha.RuntimeServiceServer
+	runtime_alpha.ImageServiceServer
 }
 
 // CRIService is the interface implement CRI remote service server.
@@ -59,7 +69,7 @@ type CRIService interface {
 	Run() error
 	// io.Closer is used by containerd to gracefully stop cri service.
 	io.Closer
-	plugin.Service
+	Register(*grpc.Server) error
 	grpcServices
 }
 
@@ -86,7 +96,7 @@ type criService struct {
 	// snapshotStore stores information of all snapshots.
 	snapshotStore *snapshotstore.Store
 	// netPlugin is used to setup and teardown network when run/stop pod sandbox.
-	netPlugin cni.CNI
+	netPlugin map[string]cni.CNI
 	// client is an instance of the containerd client
 	client *containerd.Client
 	// streamServer is the streaming server serves container streaming request.
@@ -98,9 +108,12 @@ type criService struct {
 	initialized atomic.Bool
 	// cniNetConfMonitor is used to reload cni network conf if there is
 	// any valid fs change events from cni network conf dir.
-	cniNetConfMonitor *cniNetConfSyncer
+	cniNetConfMonitor map[string]*cniNetConfSyncer
 	// baseOCISpecs contains cached OCI specs loaded via `Runtime.BaseRuntimeSpec`
 	baseOCISpecs map[string]*oci.Spec
+	// allCaps is the list of the capabilities.
+	// When nil, parsed from CapEff of /proc/self/status.
+	allCaps []string // nolint
 }
 
 // NewCRIService returns a new instance of CRIService
@@ -118,6 +131,7 @@ func NewCRIService(config criconfig.Config, client *containerd.Client) (CRIServi
 		sandboxNameIndex:   registrar.NewRegistrar(),
 		containerNameIndex: registrar.NewRegistrar(),
 		initialized:        atomic.NewBool(false),
+		netPlugin:          make(map[string]cni.CNI),
 	}
 
 	if client.SnapshotService(c.config.ContainerdConfig.Snapshotter) == nil {
@@ -139,9 +153,21 @@ func NewCRIService(config criconfig.Config, client *containerd.Client) (CRIServi
 
 	c.eventMonitor = newEventMonitor(c)
 
-	c.cniNetConfMonitor, err = newCNINetConfSyncer(c.config.NetworkPluginConfDir, c.netPlugin, c.cniLoadOptions())
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to create cni conf monitor")
+	c.cniNetConfMonitor = make(map[string]*cniNetConfSyncer)
+	for name, i := range c.netPlugin {
+		path := c.config.NetworkPluginConfDir
+		if name != defaultNetworkPlugin {
+			if rc, ok := c.config.Runtimes[name]; ok {
+				path = rc.NetworkPluginConfDir
+			}
+		}
+		if path != "" {
+			m, err := newCNINetConfSyncer(path, i, c.cniLoadOptions())
+			if err != nil {
+				return nil, errors.Wrapf(err, "failed to create cni conf monitor for %s", name)
+			}
+			c.cniNetConfMonitor[name] = m
+		}
 	}
 
 	// Preload base OCI specs
@@ -191,12 +217,20 @@ func (c *criService) Run() error {
 	)
 	snapshotsSyncer.start()
 
-	// Start CNI network conf syncer
-	logrus.Info("Start cni network conf syncer")
-	cniNetConfMonitorErrCh := make(chan error, 1)
+	// Start CNI network conf syncers
+	cniNetConfMonitorErrCh := make(chan error, len(c.cniNetConfMonitor))
+	var netSyncGroup sync.WaitGroup
+	for name, h := range c.cniNetConfMonitor {
+		netSyncGroup.Add(1)
+		logrus.Infof("Start cni network conf syncer for %s", name)
+		go func(h *cniNetConfSyncer) {
+			cniNetConfMonitorErrCh <- h.syncLoop()
+			netSyncGroup.Done()
+		}(h)
+	}
 	go func() {
-		defer close(cniNetConfMonitorErrCh)
-		cniNetConfMonitorErrCh <- c.cniNetConfMonitor.syncLoop()
+		netSyncGroup.Wait()
+		close(cniNetConfMonitorErrCh)
 	}()
 
 	// Start streaming server.
@@ -263,8 +297,10 @@ func (c *criService) Run() error {
 // TODO(random-liu): Make close synchronous.
 func (c *criService) Close() error {
 	logrus.Info("Stop CRI service")
-	if err := c.cniNetConfMonitor.stop(); err != nil {
-		logrus.WithError(err).Error("failed to stop cni network conf monitor")
+	for name, h := range c.cniNetConfMonitor {
+		if err := h.stop(); err != nil {
+			logrus.WithError(err).Errorf("failed to stop cni network conf monitor for %s", name)
+		}
 	}
 	c.eventMonitor.stop()
 	if err := c.streamServer.Stop(); err != nil {
@@ -277,6 +313,9 @@ func (c *criService) register(s *grpc.Server) error {
 	instrumented := newInstrumentedService(c)
 	runtime.RegisterRuntimeServiceServer(s, instrumented)
 	runtime.RegisterImageServiceServer(s, instrumented)
+	instrumentedAlpha := newInstrumentedAlphaService(c)
+	runtime_alpha.RegisterRuntimeServiceServer(s, instrumentedAlpha)
+	runtime_alpha.RegisterImageServiceServer(s, instrumentedAlpha)
 	return nil
 }
 

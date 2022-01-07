@@ -21,7 +21,7 @@ import (
 	"github.com/containerd/containerd/api/types"
 	"github.com/pkg/errors"
 	"golang.org/x/net/context"
-	runtime "k8s.io/cri-api/pkg/apis/runtime/v1alpha2"
+	runtime "k8s.io/cri-api/pkg/apis/runtime/v1"
 
 	containerstore "github.com/containerd/containerd/pkg/cri/store/container"
 )
@@ -81,7 +81,7 @@ func (c *criService) buildTaskMetricsRequest(
 ) (tasks.MetricsRequest, []containerstore.Container, error) {
 	var req tasks.MetricsRequest
 	if r.GetFilter() == nil {
-		return req, nil, nil
+		return req, c.containerStore.List(), nil
 	}
 	c.normalizeContainerStatsFilter(r.GetFilter())
 	var containers []containerstore.Container

@@ -21,7 +21,7 @@ import (
 
 	cni "github.com/containerd/go-cni"
 	"github.com/pkg/errors"
-	runtime "k8s.io/cri-api/pkg/apis/runtime/v1alpha2"
+	runtime "k8s.io/cri-api/pkg/apis/runtime/v1"
 )
 
 // NOTE(random-liu):
@@ -60,7 +60,7 @@ type Metadata struct {
 	// RuntimeHandler is the runtime handler name of the pod.
 	RuntimeHandler string
 	// CNIresult resulting configuration for attached network namespace interfaces
-	CNIResult *cni.CNIResult
+	CNIResult *cni.Result
 	// ProcessLabel is the SELinux process label for the container
 	ProcessLabel string
 }

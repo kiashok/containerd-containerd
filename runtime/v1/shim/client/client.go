@@ -1,3 +1,4 @@
+//go:build !windows
 // +build !windows
 
 /*
@@ -22,10 +23,8 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -33,20 +32,18 @@ import (
 	"syscall"
 	"time"
 
-	"golang.org/x/sys/unix"
-
-	"github.com/containerd/ttrpc"
-	"github.com/pkg/errors"
-	"github.com/sirupsen/logrus"
-
 	"github.com/containerd/containerd/events"
 	"github.com/containerd/containerd/log"
-	"github.com/containerd/containerd/pkg/dialer"
 	v1 "github.com/containerd/containerd/runtime/v1"
 	"github.com/containerd/containerd/runtime/v1/shim"
 	shimapi "github.com/containerd/containerd/runtime/v1/shim/v1"
 	"github.com/containerd/containerd/sys"
+	"github.com/containerd/ttrpc"
 	ptypes "github.com/gogo/protobuf/types"
+	"github.com/pkg/errors"
+	"github.com/sirupsen/logrus"
+	exec "golang.org/x/sys/execabs"
+	"golang.org/x/sys/unix"
 )
 
 var empty = &ptypes.Empty{}
@@ -59,17 +56,25 @@ func WithStart(binary, address, daemonAddress, cgroup string, debug bool, exitHa
 	return func(ctx context.Context, config shim.Config) (_ shimapi.ShimService, _ io.Closer, err error) {
 		socket, err := newSocket(address)
 		if err != nil {
-			return nil, nil, err
+			if !eaddrinuse(err) {
+				return nil, nil, err
+			}
+			if err := RemoveSocket(address); err != nil {
+				return nil, nil, errors.Wrap(err, "remove already used socket")
+			}
+			if socket, err = newSocket(address); err != nil {
+				return nil, nil, err
+			}
 		}
-		defer socket.Close()
+
 		f, err := socket.File()
 		if err != nil {
 			return nil, nil, errors.Wrapf(err, "failed to get fd for socket %s", address)
 		}
 		defer f.Close()
 
-		stdoutCopy := ioutil.Discard
-		stderrCopy := ioutil.Discard
+		stdoutCopy := io.Discard
+		stderrCopy := io.Discard
 		stdoutLog, err := v1.OpenShimStdoutLog(ctx, config.WorkDir)
 		if err != nil {
 			return nil, nil, errors.Wrapf(err, "failed to create stdout log")
@@ -108,6 +113,8 @@ func WithStart(binary, address, daemonAddress, cgroup string, debug bool, exitHa
 			if stderrLog != nil {
 				stderrLog.Close()
 			}
+			socket.Close()
+			RemoveSocket(address)
 		}()
 		log.G(ctx).WithFields(logrus.Fields{
 			"pid":     cmd.Process.Pid,
@@ -142,8 +149,29 @@ func WithStart(binary, address, daemonAddress, cgroup string, debug bool, exitHa
 	}
 }
 
+func eaddrinuse(err error) bool {
+	cause := errors.Cause(err)
+	netErr, ok := cause.(*net.OpError)
+	if !ok {
+		return false
+	}
+	if netErr.Op != "listen" {
+		return false
+	}
+	syscallErr, ok := netErr.Err.(*os.SyscallError)
+	if !ok {
+		return false
+	}
+	errno, ok := syscallErr.Err.(syscall.Errno)
+	if !ok {
+		return false
+	}
+	return errno == syscall.EADDRINUSE
+}
+
 // setupOOMScore gets containerd's oom score and adds +1 to it
 // to ensure a shim has a lower* score than the daemons
+// if not already at the maximum OOM Score
 func setupOOMScore(shimPid int) error {
 	pid := os.Getpid()
 	score, err := sys.GetOOMScoreAdj(pid)
@@ -151,7 +179,7 @@ func setupOOMScore(shimPid int) error {
 		return errors.Wrap(err, "get daemon OOM score")
 	}
 	shimScore := score + 1
-	if err := sys.SetOOMScore(shimPid, shimScore); err != nil {
+	if err := sys.AdjustOOMScore(shimPid, shimScore); err != nil {
 		return errors.Wrap(err, "set shim OOM score")
 	}
 	return nil
@@ -214,31 +242,80 @@ func writeFile(path, address string) error {
 	return os.Rename(tempPath, path)
 }
 
-func newSocket(address string) (*net.UnixListener, error) {
-	if len(address) > 106 {
-		return nil, errors.Errorf("%q: unix socket path too long (> 106)", address)
+const (
+	abstractSocketPrefix = "\x00"
+	socketPathLimit      = 106
+)
+
+type socket string
+
+func (s socket) isAbstract() bool {
+	return !strings.HasPrefix(string(s), "unix://")
+}
+
+func (s socket) path() string {
+	path := strings.TrimPrefix(string(s), "unix://")
+	// if there was no trim performed, we assume an abstract socket
+	if len(path) == len(s) {
+		path = abstractSocketPrefix + path
 	}
-	l, err := net.Listen("unix", "\x00"+address)
+	return path
+}
+
+func newSocket(address string) (*net.UnixListener, error) {
+	if len(address) > socketPathLimit {
+		return nil, errors.Errorf("%q: unix socket path too long (> %d)", address, socketPathLimit)
+	}
+	var (
+		sock = socket(address)
+		path = sock.path()
+	)
+	if !sock.isAbstract() {
+		if err := os.MkdirAll(filepath.Dir(path), 0600); err != nil {
+			return nil, errors.Wrapf(err, "%s", path)
+		}
+	}
+	l, err := net.Listen("unix", path)
 	if err != nil {
-		return nil, errors.Wrapf(err, "failed to listen to abstract unix socket %q", address)
+		return nil, errors.Wrapf(err, "failed to listen to unix socket %q (abstract: %t)", address, sock.isAbstract())
+	}
+	if err := os.Chmod(path, 0600); err != nil {
+		l.Close()
+		return nil, err
 	}
 
 	return l.(*net.UnixListener), nil
+}
+
+// RemoveSocket removes the socket at the specified address if
+// it exists on the filesystem
+func RemoveSocket(address string) error {
+	sock := socket(address)
+	if !sock.isAbstract() {
+		return os.Remove(sock.path())
+	}
+	return nil
+}
+
+// AnonDialer returns a dialer for a socket
+//
+// NOTE: It is only used for testing.
+func AnonDialer(address string, timeout time.Duration) (net.Conn, error) {
+	return anonDialer(address, timeout)
 }
 
 func connect(address string, d func(string, time.Duration) (net.Conn, error)) (net.Conn, error) {
 	return d(address, 100*time.Second)
 }
 
-func annonDialer(address string, timeout time.Duration) (net.Conn, error) {
-	address = strings.TrimPrefix(address, "unix://")
-	return dialer.Dialer("\x00"+address, timeout)
+func anonDialer(address string, timeout time.Duration) (net.Conn, error) {
+	return net.DialTimeout("unix", socket(address).path(), timeout)
 }
 
 // WithConnect connects to an existing shim
 func WithConnect(address string, onClose func()) Opt {
 	return func(ctx context.Context, config shim.Config) (shimapi.ShimService, io.Closer, error) {
-		conn, err := connect(address, annonDialer)
+		conn, err := connect(address, anonDialer)
 		if err != nil {
 			return nil, nil, err
 		}

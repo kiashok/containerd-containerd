@@ -1,3 +1,4 @@
+//go:build linux
 // +build linux
 
 /*
@@ -20,10 +21,10 @@ package v1
 
 import (
 	"context"
-	"io/ioutil"
+	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
+	goruntime "runtime"
 	"sync"
 	"syscall"
 	"time"
@@ -37,6 +38,7 @@ import (
 	"github.com/containerd/containerd/pkg/oom"
 	oomv1 "github.com/containerd/containerd/pkg/oom/v1"
 	"github.com/containerd/containerd/pkg/process"
+	"github.com/containerd/containerd/pkg/schedcore"
 	"github.com/containerd/containerd/pkg/stdio"
 	"github.com/containerd/containerd/runtime/v2/runc"
 	"github.com/containerd/containerd/runtime/v2/runc/options"
@@ -49,6 +51,7 @@ import (
 	ptypes "github.com/gogo/protobuf/types"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
+	exec "golang.org/x/sys/execabs"
 	"golang.org/x/sys/unix"
 )
 
@@ -126,33 +129,60 @@ func newCommand(ctx context.Context, id, containerdBinary, containerdAddress, co
 	return cmd, nil
 }
 
-func (s *service) StartShim(ctx context.Context, id, containerdBinary, containerdAddress, containerdTTRPCAddress string) (string, error) {
-	cmd, err := newCommand(ctx, id, containerdBinary, containerdAddress, containerdTTRPCAddress)
+func (s *service) StartShim(ctx context.Context, opts shim.StartOpts) (_ string, retErr error) {
+	cmd, err := newCommand(ctx, opts.ID, opts.ContainerdBinary, opts.Address, opts.TTRPCAddress)
 	if err != nil {
 		return "", err
 	}
-	address, err := shim.SocketAddress(ctx, id)
+	address, err := shim.SocketAddress(ctx, opts.Address, opts.ID)
 	if err != nil {
 		return "", err
 	}
 	socket, err := shim.NewSocket(address)
 	if err != nil {
+		if !shim.SocketEaddrinuse(err) {
+			return "", err
+		}
+		if err := shim.RemoveSocket(address); err != nil {
+			return "", errors.Wrap(err, "remove already used socket")
+		}
+		if socket, err = shim.NewSocket(address); err != nil {
+			return "", err
+		}
+	}
+	defer func() {
+		if retErr != nil {
+			socket.Close()
+			_ = shim.RemoveSocket(address)
+		}
+	}()
+	// make sure that reexec shim-v2 binary use the value if need
+	if err := shim.WriteAddress("address", address); err != nil {
 		return "", err
 	}
-	defer socket.Close()
+
 	f, err := socket.File()
 	if err != nil {
 		return "", err
 	}
-	defer f.Close()
 
 	cmd.ExtraFiles = append(cmd.ExtraFiles, f)
 
+	goruntime.LockOSThread()
+	if os.Getenv("SCHED_CORE") != "" {
+		if err := schedcore.Create(schedcore.ProcessGroup); err != nil {
+			return "", errors.Wrap(err, "enable sched core support")
+		}
+	}
+
 	if err := cmd.Start(); err != nil {
+		f.Close()
 		return "", err
 	}
+	goruntime.UnlockOSThread()
+
 	defer func() {
-		if err != nil {
+		if retErr != nil {
 			cmd.Process.Kill()
 		}
 	}()
@@ -161,10 +191,7 @@ func (s *service) StartShim(ctx context.Context, id, containerdBinary, container
 	if err := shim.WritePidFile("shim.pid", cmd.Process.Pid); err != nil {
 		return "", err
 	}
-	if err := shim.WriteAddress("address", address); err != nil {
-		return "", err
-	}
-	if data, err := ioutil.ReadAll(os.Stdin); err == nil {
+	if data, err := io.ReadAll(os.Stdin); err == nil {
 		if len(data) > 0 {
 			var any ptypes.Any
 			if err := proto.Unmarshal(data, &any); err != nil {
@@ -196,6 +223,12 @@ func (s *service) StartShim(ctx context.Context, id, containerdBinary, container
 }
 
 func (s *service) Cleanup(ctx context.Context) (*taskAPI.DeleteResponse, error) {
+	if address, err := shim.ReadAddress("address"); err == nil {
+		if err = shim.RemoveSocket(address); err != nil {
+			return nil, err
+		}
+	}
+
 	path, err := os.Getwd()
 	if err != nil {
 		return nil, err
@@ -549,6 +582,8 @@ func (s *service) Connect(ctx context.Context, r *taskAPI.ConnectRequest) (*task
 }
 
 func (s *service) Shutdown(ctx context.Context, r *taskAPI.ShutdownRequest) (*ptypes.Empty, error) {
+	// please make sure that temporary resource has been cleanup
+	// before shutdown service.
 	s.cancel()
 	close(s.events)
 	return empty, nil

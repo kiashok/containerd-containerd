@@ -21,7 +21,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"math/rand"
 	"os"
 	"runtime"
@@ -104,7 +103,7 @@ func makeTest(t *testing.T, name string, storeFn func(ctx context.Context, root 
 		ctx := context.WithValue(context.Background(), nameKey{}, name)
 		ctx = logtest.WithT(ctx, t)
 
-		tmpDir, err := ioutil.TempDir("", "content-suite-"+name+"-")
+		tmpDir, err := os.MkdirTemp("", "content-suite-"+name+"-")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -780,8 +779,9 @@ func checkSmallBlob(ctx context.Context, t *testing.T, store content.Store) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer ra.Close()
 	r := io.NewSectionReader(ra, 0, readSize)
-	b, err := ioutil.ReadAll(r)
+	b, err := io.ReadAll(r)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -820,6 +820,7 @@ func checkCrossNSShare(ctx context.Context, t *testing.T, cs content.Store) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer w.Close()
 	t2 := time.Now()
 
 	checkStatus(t, w, content.Status{
@@ -878,6 +879,7 @@ func checkCrossNSAppend(ctx context.Context, t *testing.T, cs content.Store) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer w.Close()
 	t2 := time.Now()
 
 	checkStatus(t, w, content.Status{
@@ -940,6 +942,7 @@ func checkCrossNSIsolate(ctx context.Context, t *testing.T, cs content.Store) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer w.Close()
 	t4 := time.Now()
 
 	checkNewlyCreated(t, w, t1, t2, t3, t4)
@@ -1079,7 +1082,7 @@ func createContent(size int64) ([]byte, digest.Digest) {
 	// test runs. An atomic integer works just good enough for this.
 	seed := atomic.AddInt64(&contentSeed, 1)
 
-	b, err := ioutil.ReadAll(io.LimitReader(rand.New(rand.NewSource(seed)), size))
+	b, err := io.ReadAll(io.LimitReader(rand.New(rand.NewSource(seed)), size))
 	if err != nil {
 		panic(err)
 	}

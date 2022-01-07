@@ -1,5 +1,3 @@
-// +build linux
-
 /*
    Copyright The containerd Authors.
 
@@ -23,30 +21,26 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	runtime "k8s.io/cri-api/pkg/apis/runtime/v1alpha2"
+	runtime "k8s.io/cri-api/pkg/apis/runtime/v1"
 )
 
+// TODO(chrisfegly): add/update test(s) to allow testing of multiple runtimes at the same time
 func TestRuntimeHandler(t *testing.T) {
 	t.Logf("Create a sandbox")
-	sbConfig := PodSandboxConfig("sandbox", "test-runtime-handler")
-	t.Logf("the --runtime-handler flag value is: %s", *runtimeHandler)
-	sb, err := runtimeService.RunPodSandbox(sbConfig, *runtimeHandler)
-	require.NoError(t, err)
-	defer func() {
-		// Make sure the sandbox is cleaned up in any case.
-		runtimeService.StopPodSandbox(sb)
-		runtimeService.RemovePodSandbox(sb)
-	}()
+	if *runtimeHandler == "" {
+		t.Logf("The --runtime-handler flag value is empty which results internally to setting the default runtime")
+	} else {
+		t.Logf("The --runtime-handler flag value is %s", *runtimeHandler)
+	}
+	sb, _ := PodSandboxConfigWithCleanup(t, "sandbox", "test-runtime-handler")
 
-	t.Logf("Verify runtimeService.PodSandboxStatus sets RuntimeHandler")
+	t.Logf("Verify runtimeService.PodSandboxStatus() returns previously set runtimeHandler")
 	sbStatus, err := runtimeService.PodSandboxStatus(sb)
 	require.NoError(t, err)
-	t.Logf("runtimeService.PodSandboxStatus sets RuntimeHandler to %s", sbStatus.RuntimeHandler)
 	assert.Equal(t, *runtimeHandler, sbStatus.RuntimeHandler)
 
-	t.Logf("Verify runtimeService.ListPodSandbox sets RuntimeHandler")
+	t.Logf("Verify runtimeService.ListPodSandbox() returns previously set runtimeHandler")
 	sandboxes, err := runtimeService.ListPodSandbox(&runtime.PodSandboxFilter{})
 	require.NoError(t, err)
-	t.Logf("runtimeService.ListPodSandbox sets RuntimeHandler to %s", sbStatus.RuntimeHandler)
 	assert.Equal(t, *runtimeHandler, sandboxes[0].RuntimeHandler)
 }

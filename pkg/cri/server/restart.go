@@ -17,7 +17,6 @@
 package server
 
 import (
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	goruntime "runtime"
@@ -32,7 +31,7 @@ import (
 	"github.com/containerd/typeurl"
 	"github.com/pkg/errors"
 	"golang.org/x/net/context"
-	runtime "k8s.io/cri-api/pkg/apis/runtime/v1alpha2"
+	runtime "k8s.io/cri-api/pkg/apis/runtime/v1"
 
 	cio "github.com/containerd/containerd/pkg/cri/io"
 	containerstore "github.com/containerd/containerd/pkg/cri/store/container"
@@ -47,7 +46,7 @@ import (
 // 2) Containerd containers may be deleted, but SHOULD NOT be added. Or else, recovery logic
 // for the newly added container/sandbox will return error, because there is no corresponding root
 // directory created.
-// 3) Containerd container tasks may exit or be stoppped, deleted. Even though current logic could
+// 3) Containerd container tasks may exit or be stopped, deleted. Even though current logic could
 // tolerant tasks being created or started, we prefer that not to happen.
 
 // recover recovers system state from containerd and status checkpoint.
@@ -264,7 +263,7 @@ func (c *criService) loadContainer(ctx context.Context, cntr containerd.Containe
 					return errors.Errorf("unexpected container state for created task: %q", status.State())
 				}
 			case containerd.Running:
-				// Task is running. Container must be in `RUNNING` state, based on our assuption that
+				// Task is running. Container must be in `RUNNING` state, based on our assumption that
 				// "task should not be started when containerd is down".
 				switch status.State() {
 				case runtime.ContainerState_CONTAINER_EXITED:
@@ -290,7 +289,7 @@ func (c *criService) loadContainer(ctx context.Context, cntr containerd.Containe
 					status.Reason = unknownExitReason
 				} else {
 					// Start exit monitor.
-					c.eventMonitor.startExitMonitor(context.Background(), id, status.Pid, exitCh)
+					c.eventMonitor.startContainerExitMonitor(context.Background(), id, status.Pid, exitCh)
 				}
 			case containerd.Stopped:
 				// Task is stopped. Updata status and delete the task.
@@ -389,7 +388,7 @@ func (c *criService) loadSandbox(ctx context.Context, cntr containerd.Container)
 					// Task is running, set sandbox state as READY.
 					status.State = sandboxstore.StateReady
 					status.Pid = t.Pid()
-					c.eventMonitor.startExitMonitor(context.Background(), meta.ID, status.Pid, exitCh)
+					c.eventMonitor.startSandboxExitMonitor(context.Background(), meta.ID, status.Pid, exitCh)
 				}
 			} else {
 				// Task is not running. Delete the task and set sandbox state as NOTREADY.
@@ -412,6 +411,9 @@ func (c *criService) loadSandbox(ctx context.Context, cntr containerd.Container)
 	if goruntime.GOOS != "windows" &&
 		meta.Config.GetLinux().GetSecurityContext().GetNamespaceOptions().GetNetwork() == runtime.NamespaceMode_NODE {
 		// Don't need to load netns for host network sandbox.
+		return sandbox, nil
+	}
+	if goruntime.GOOS == "windows" && meta.Config.GetWindows().GetSecurityContext().GetHostProcess() {
 		return sandbox, nil
 	}
 	sandbox.NetNS = netns.LoadNetNS(meta.NetNSPath)
@@ -455,7 +457,7 @@ func (c *criService) loadImages(ctx context.Context, cImages []containerd.Image)
 
 func cleanupOrphanedIDDirs(ctx context.Context, cntrs []containerd.Container, base string) error {
 	// Cleanup orphaned id directories.
-	dirs, err := ioutil.ReadDir(base)
+	dirs, err := os.ReadDir(base)
 	if err != nil && !os.IsNotExist(err) {
 		return errors.Wrap(err, "failed to read base directory")
 	}

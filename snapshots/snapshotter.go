@@ -28,11 +28,8 @@ import (
 const (
 	// UnpackKeyPrefix is the beginning of the key format used for snapshots that will have
 	// image content unpacked into them.
-	UnpackKeyPrefix       = "extract"
-	UnpackKeyFormat       = UnpackKeyPrefix + "-%s %s"
 	inheritedLabelsPrefix = "containerd.io/snapshot/"
 	labelSnapshotRef      = "containerd.io/snapshot.ref"
-)
 
 // Kind identifies the kind of snapshot.
 type Kind uint8

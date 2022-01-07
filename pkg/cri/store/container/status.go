@@ -18,14 +18,13 @@ package container
 
 import (
 	"encoding/json"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"sync"
 
 	"github.com/containerd/continuity"
 	"github.com/pkg/errors"
-	runtime "k8s.io/cri-api/pkg/apis/runtime/v1alpha2"
+	runtime "k8s.io/cri-api/pkg/apis/runtime/v1"
 )
 
 // The container state machine in the CRI plugin:
@@ -156,7 +155,7 @@ type StatusStorage interface {
 	// Delete the container status.
 	// Note:
 	// * Delete should be idempotent.
-	// * The status must be deleted in one trasaction.
+	// * The status must be deleted in one transaction.
 	Delete() error
 }
 
@@ -182,7 +181,7 @@ func StoreStatus(root, id string, status Status) (StatusStorage, error) {
 // writing to the file during loading.
 func LoadStatus(root, id string) (Status, error) {
 	path := filepath.Join(root, "status")
-	data, err := ioutil.ReadFile(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return Status{}, errors.Wrapf(err, "failed to read status from %q", path)
 	}
