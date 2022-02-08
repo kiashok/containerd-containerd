@@ -26,6 +26,7 @@ import (
 
 	"github.com/containerd/containerd/log"
 	remoteserrors "github.com/containerd/containerd/remotes/errors"
+	"github.com/containerd/containerd/version"
 	"github.com/pkg/errors"
 	"golang.org/x/net/context/ctxhttp"
 )
@@ -57,7 +58,7 @@ func GenerateTokenOptions(ctx context.Context, host, username, secret string, c 
 
 	scope, ok := c.Parameters["scope"]
 	if ok {
-		to.Scopes = append(to.Scopes, scope)
+		to.Scopes = append(to.Scopes, strings.Split(scope, " ")...)
 	} else {
 		log.G(ctx).WithField("host", host).Debug("no scope specified for token auth challenge")
 	}
@@ -65,13 +66,22 @@ func GenerateTokenOptions(ctx context.Context, host, username, secret string, c 
 	return to, nil
 }
 
-// TokenOptions are optios for requesting a token
+// TokenOptions are options for requesting a token
 type TokenOptions struct {
 	Realm    string
 	Service  string
 	Scopes   []string
 	Username string
 	Secret   string
+
+	// FetchRefreshToken enables fetching a refresh token (aka "identity token", "offline token") along with the bearer token.
+	//
+	// For HTTP GET mode (FetchToken), FetchRefreshToken sets `offline_token=true` in the request.
+	// https://docs.docker.com/registry/spec/auth/token/#requesting-a-token
+	//
+	// For HTTP POST mode (FetchTokenWithOAuth), FetchRefreshToken sets `access_type=offline` in the request.
+	// https://docs.docker.com/registry/spec/auth/oauth/#getting-a-token
+	FetchRefreshToken bool
 }
 
 // OAuthTokenResponse is response from fetching token with a OAuth POST request
@@ -100,6 +110,9 @@ func FetchTokenWithOAuth(ctx context.Context, client *http.Client, headers http.
 		form.Set("username", to.Username)
 		form.Set("password", to.Secret)
 	}
+	if to.FetchRefreshToken {
+		form.Set("access_type", "offline")
+	}
 
 	req, err := http.NewRequest("POST", to.Realm, strings.NewReader(form.Encode()))
 	if err != nil {
@@ -108,6 +121,9 @@ func FetchTokenWithOAuth(ctx context.Context, client *http.Client, headers http.
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded; charset=utf-8")
 	for k, v := range headers {
 		req.Header[k] = append(req.Header[k], v...)
+	}
+	if len(req.Header.Get("User-Agent")) == 0 {
+		req.Header.Set("User-Agent", "containerd/"+version.Version)
 	}
 
 	resp, err := ctxhttp.Do(ctx, client, req)
@@ -153,6 +169,9 @@ func FetchToken(ctx context.Context, client *http.Client, headers http.Header, t
 	for k, v := range headers {
 		req.Header[k] = append(req.Header[k], v...)
 	}
+	if len(req.Header.Get("User-Agent")) == 0 {
+		req.Header.Set("User-Agent", "containerd/"+version.Version)
+	}
 
 	reqParams := req.URL.Query()
 
@@ -166,6 +185,10 @@ func FetchToken(ctx context.Context, client *http.Client, headers http.Header, t
 
 	if to.Secret != "" {
 		req.SetBasicAuth(to.Username, to.Secret)
+	}
+
+	if to.FetchRefreshToken {
+		reqParams.Add("offline_token", "true")
 	}
 
 	req.URL.RawQuery = reqParams.Encode()

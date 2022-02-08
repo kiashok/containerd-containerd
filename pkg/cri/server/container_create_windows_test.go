@@ -1,5 +1,3 @@
-// +build windows
-
 /*
    Copyright The containerd Authors.
 
@@ -24,7 +22,7 @@ import (
 	imagespec "github.com/opencontainers/image-spec/specs-go/v1"
 	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/stretchr/testify/assert"
-	runtime "k8s.io/cri-api/pkg/apis/runtime/v1alpha2"
+	runtime "k8s.io/cri-api/pkg/apis/runtime/v1"
 
 	"github.com/containerd/containerd/pkg/cri/annotations"
 	"github.com/containerd/containerd/pkg/cri/config"
@@ -74,6 +72,7 @@ func getCreateContainerTestData() (*runtime.ContainerConfig, *runtime.PodSandbox
 			SecurityContext: &runtime.WindowsContainerSecurityContext{
 				RunAsUsername:  "test-user",
 				CredentialSpec: "{\"test\": \"spec\"}",
+				HostProcess:    false,
 			},
 		},
 	}
@@ -126,6 +125,15 @@ func getCreateContainerTestData() (*runtime.ContainerConfig, *runtime.PodSandbox
 
 		assert.Contains(t, spec.Annotations, annotations.ContainerType)
 		assert.EqualValues(t, spec.Annotations[annotations.ContainerType], annotations.ContainerTypeContainer)
+
+		assert.Contains(t, spec.Annotations, annotations.SandboxNamespace)
+		assert.EqualValues(t, spec.Annotations[annotations.SandboxNamespace], "test-sandbox-ns")
+
+		assert.Contains(t, spec.Annotations, annotations.SandboxName)
+		assert.EqualValues(t, spec.Annotations[annotations.SandboxName], "test-sandbox-name")
+
+		assert.Contains(t, spec.Annotations, annotations.WindowsHostProcess)
+		assert.EqualValues(t, spec.Annotations[annotations.WindowsHostProcess], "false")
 	}
 	return config, sandboxConfig, imageConfig, specCheck
 }
@@ -139,7 +147,7 @@ func TestContainerWindowsNetworkNamespace(t *testing.T) {
 	c := newTestCRIService()
 
 	containerConfig, sandboxConfig, imageConfig, specCheck := getCreateContainerTestData()
-	spec, err := c.containerSpec(testID, testSandboxID, testPid, nsPath, testContainerName, containerConfig, sandboxConfig, imageConfig, nil, config.Runtime{})
+	spec, err := c.containerSpec(testID, testSandboxID, testPid, nsPath, testContainerName, testImageName, containerConfig, sandboxConfig, imageConfig, nil, config.Runtime{})
 	assert.NoError(t, err)
 	assert.NotNil(t, spec)
 	specCheck(t, testID, testSandboxID, testPid, spec)
@@ -161,7 +169,7 @@ func TestMountCleanPath(t *testing.T) {
 		ContainerPath: "c:/test/container-path",
 		HostPath:      "c:/test/host-path",
 	})
-	spec, err := c.containerSpec(testID, testSandboxID, testPid, nsPath, testContainerName, containerConfig, sandboxConfig, imageConfig, nil, config.Runtime{})
+	spec, err := c.containerSpec(testID, testSandboxID, testPid, nsPath, testContainerName, testImageName, containerConfig, sandboxConfig, imageConfig, nil, config.Runtime{})
 	assert.NoError(t, err)
 	assert.NotNil(t, spec)
 	specCheck(t, testID, testSandboxID, testPid, spec)
@@ -181,7 +189,7 @@ func TestMountNamedPipe(t *testing.T) {
 		ContainerPath: `\\.\pipe\foo`,
 		HostPath:      `\\.\pipe\foo`,
 	})
-	spec, err := c.containerSpec(testID, testSandboxID, testPid, nsPath, testContainerName, containerConfig, sandboxConfig, imageConfig, nil, config.Runtime{})
+	spec, err := c.containerSpec(testID, testSandboxID, testPid, nsPath, testContainerName, testImageName, containerConfig, sandboxConfig, imageConfig, nil, config.Runtime{})
 	assert.NoError(t, err)
 	assert.NotNil(t, spec)
 	specCheck(t, testID, testSandboxID, testPid, spec)

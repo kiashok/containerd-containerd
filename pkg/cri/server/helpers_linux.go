@@ -30,14 +30,15 @@ import (
 
 	"github.com/containerd/containerd/log"
 	"github.com/containerd/containerd/mount"
+	"github.com/containerd/containerd/pkg/apparmor"
 	"github.com/containerd/containerd/pkg/seccomp"
 	"github.com/containerd/containerd/pkg/seutil"
-	runcapparmor "github.com/opencontainers/runc/libcontainer/apparmor"
+	"github.com/moby/sys/mountinfo"
 	"github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/opencontainers/selinux/go-selinux/label"
 	"github.com/pkg/errors"
 	"golang.org/x/sys/unix"
-	runtime "k8s.io/cri-api/pkg/apis/runtime/v1alpha2"
+	runtime "k8s.io/cri-api/pkg/apis/runtime/v1"
 )
 
 const (
@@ -47,9 +48,6 @@ const (
 	defaultShmSize = int64(1024 * 1024 * 64)
 	// relativeRootfsPath is the rootfs path relative to bundle path.
 	relativeRootfsPath = "rootfs"
-	// According to http://man7.org/linux/man-pages/man5/resolv.conf.5.html:
-	// "The search list is currently limited to six domains with a total of 256 characters."
-	maxDNSSearches = 6
 	// devShm is the default path of /dev/shm.
 	devShm = "/dev/shm"
 	// etcHosts is the default path of /etc/hosts file.
@@ -141,8 +139,13 @@ func checkSelinuxLevel(level string) error {
 	return nil
 }
 
+// apparmorEnabled returns true if apparmor is enabled, supported by the host,
+// if apparmor_parser is installed, and if we are not running docker-in-docker.
 func (c *criService) apparmorEnabled() bool {
-	return runcapparmor.IsEnabled() && !c.config.DisableApparmor
+	if c.config.DisableApparmor {
+		return false
+	}
+	return apparmor.HostSupports()
 }
 
 func (c *criService) seccompEnabled() bool {
@@ -151,40 +154,32 @@ func (c *criService) seccompEnabled() bool {
 
 // openLogFile opens/creates a container log file.
 func openLogFile(path string) (*os.File, error) {
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return nil, err
+	}
 	return os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0640)
 }
 
 // unmountRecursive unmounts the target and all mounts underneath, starting with
 // the deepest mount first.
 func unmountRecursive(ctx context.Context, target string) error {
-	mounts, err := mount.Self()
+	toUnmount, err := mountinfo.GetMounts(mountinfo.PrefixFilter(target))
 	if err != nil {
 		return err
 	}
 
-	var toUnmount []string
-	for _, m := range mounts {
-		p, err := filepath.Rel(target, m.Mountpoint)
-		if err != nil {
-			return err
-		}
-		if !strings.HasPrefix(p, "..") {
-			toUnmount = append(toUnmount, m.Mountpoint)
-		}
-	}
-
 	// Make the deepest mount be first
 	sort.Slice(toUnmount, func(i, j int) bool {
-		return len(toUnmount[i]) > len(toUnmount[j])
+		return len(toUnmount[i].Mountpoint) > len(toUnmount[j].Mountpoint)
 	})
 
-	for i, mountPath := range toUnmount {
-		if err := mount.UnmountAll(mountPath, unix.MNT_DETACH); err != nil {
+	for i, m := range toUnmount {
+		if err := mount.UnmountAll(m.Mountpoint, unix.MNT_DETACH); err != nil {
 			if i == len(toUnmount)-1 { // last mount
 				return err
 			}
 			// This is some submount, we can ignore this error for now, the final unmount will fail if this is a real problem
-			log.G(ctx).WithError(err).Debugf("failed to unmount submount %s", mountPath)
+			log.G(ctx).WithError(err).Debugf("failed to unmount submount %s", m.Mountpoint)
 		}
 	}
 	return nil
@@ -274,17 +269,10 @@ func modifyProcessLabel(runtimeType string, spec *specs.Spec) error {
 	if !isVMBasedRuntime(runtimeType) {
 		return nil
 	}
-	l, err := getKVMLabel(spec.Process.SelinuxLabel)
+	l, err := seutil.ChangeToKVM(spec.Process.SelinuxLabel)
 	if err != nil {
 		return errors.Wrap(err, "failed to get selinux kvm label")
 	}
 	spec.Process.SelinuxLabel = l
 	return nil
-}
-
-func getKVMLabel(l string) (string, error) {
-	if !seutil.HasType("container_kvm_t") {
-		return "", nil
-	}
-	return seutil.ChangeToKVM(l)
 }

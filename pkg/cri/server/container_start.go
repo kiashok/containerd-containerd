@@ -29,7 +29,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/net/context"
-	runtime "k8s.io/cri-api/pkg/apis/runtime/v1alpha2"
+	runtime "k8s.io/cri-api/pkg/apis/runtime/v1"
 
 	cio "github.com/containerd/containerd/pkg/cri/io"
 	containerstore "github.com/containerd/containerd/pkg/cri/store/container"
@@ -40,9 +40,15 @@ import (
 
 // StartContainer starts the container.
 func (c *criService) StartContainer(ctx context.Context, r *runtime.StartContainerRequest) (retRes *runtime.StartContainerResponse, retErr error) {
+	start := time.Now()
 	cntr, err := c.containerStore.Get(r.GetContainerId())
 	if err != nil {
 		return nil, errors.Wrapf(err, "an error occurred when try to find container %q", r.GetContainerId())
+	}
+
+	info, err := cntr.Container.Info(ctx)
+	if err != nil {
+		return nil, errors.Wrap(err, "get container info")
 	}
 
 	id := cntr.ID
@@ -84,6 +90,17 @@ func (c *criService) StartContainer(ctx context.Context, r *runtime.StartContain
 		return nil, errors.Errorf("sandbox container %q is not running", sandboxID)
 	}
 
+	// Recheck target container validity in Linux namespace options.
+	if linux := config.GetLinux(); linux != nil {
+		nsOpts := linux.GetSecurityContext().GetNamespaceOptions()
+		if nsOpts.GetPid() == runtime.NamespaceMode_TARGET {
+			_, err := c.validateTargetContainer(sandboxID, nsOpts.TargetId)
+			if err != nil {
+				return nil, errors.Wrap(err, "invalid target container")
+			}
+		}
+	}
+
 	ioCreation := func(id string) (_ containerdio.IO, err error) {
 		stdoutWC, stderrWC, err := c.createContainerLoggers(meta.LogPath, config.GetTty())
 		if err != nil {
@@ -99,7 +116,15 @@ func (c *criService) StartContainer(ctx context.Context, r *runtime.StartContain
 		return nil, errors.Wrap(err, "failed to get container info")
 	}
 
+	ociRuntime, err := c.getSandboxRuntime(sandbox.Config, sandbox.Metadata.RuntimeHandler)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to get sandbox runtime")
+	}
+
 	taskOpts := c.taskOpts(ctrInfo.Runtime.Name)
+	if ociRuntime.Path != "" {
+		taskOpts = append(taskOpts, containerd.WithRuntimePath(ociRuntime.Path))
+	}
 	task, err := container.NewTask(ctx, ioCreation, taskOpts...)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to create containerd task")
@@ -148,10 +173,10 @@ func (c *criService) StartContainer(ctx context.Context, r *runtime.StartContain
 		return nil, errors.Wrapf(err, "failed to update container %q state", id)
 	}
 
-	// start the monitor after updating container state, this ensures that
-	// event monitor receives the TaskExit event and update container state
-	// after this.
-	c.eventMonitor.startExitMonitor(context.Background(), id, task.Pid(), exitCh)
+	// It handles the TaskExit event and update container state after this.
+	c.eventMonitor.startContainerExitMonitor(context.Background(), id, task.Pid(), exitCh)
+
+	containerStartTimer.WithValues(info.Runtime.Name).UpdateSince(start)
 
 	return &runtime.StartContainerResponse{}, nil
 }

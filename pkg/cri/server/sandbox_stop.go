@@ -25,7 +25,7 @@ import (
 	"github.com/containerd/containerd/log"
 	"github.com/pkg/errors"
 	"golang.org/x/net/context"
-	runtime "k8s.io/cri-api/pkg/apis/runtime/v1alpha2"
+	runtime "k8s.io/cri-api/pkg/apis/runtime/v1"
 
 	sandboxstore "github.com/containerd/containerd/pkg/cri/store/sandbox"
 	ctrdutil "github.com/containerd/containerd/pkg/cri/util"
@@ -54,6 +54,7 @@ func (c *criService) stopPodSandbox(ctx context.Context, sandbox sandboxstore.Sa
 	// Stop all containers inside the sandbox. This terminates the container forcibly,
 	// and container may still be created, so production should not rely on this behavior.
 	// TODO(random-liu): Introduce a state in sandbox to avoid future container creation.
+	stop := time.Now()
 	containers := c.containerStore.List()
 	for _, container := range containers {
 		if container.SandboxID != id {
@@ -77,9 +78,11 @@ func (c *criService) stopPodSandbox(ctx context.Context, sandbox sandboxstore.Sa
 			return errors.Wrapf(err, "failed to stop sandbox container %q in %q state", id, state)
 		}
 	}
+	sandboxRuntimeStopTimer.WithValues(sandbox.RuntimeHandler).UpdateSince(stop)
 
 	// Teardown network for sandbox.
 	if sandbox.NetNS != nil {
+		netStop := time.Now()
 		// Use empty netns path if netns is not available. This is defined in:
 		// https://github.com/containernetworking/cni/blob/v0.7.0-alpha1/SPEC.md
 		if closed, err := sandbox.NetNS.Closed(); err != nil {
@@ -93,6 +96,7 @@ func (c *criService) stopPodSandbox(ctx context.Context, sandbox sandboxstore.Sa
 		if err := sandbox.NetNS.Remove(); err != nil {
 			return errors.Wrapf(err, "failed to remove network namespace for sandbox %q", id)
 		}
+		sandboxDeleteNetwork.UpdateSince(netStop)
 	}
 
 	log.G(ctx).Infof("TearDown network for sandbox %q successfully", id)
@@ -134,7 +138,7 @@ func (c *criService) stopSandboxContainer(ctx context.Context, sandbox sandboxst
 		}
 
 		exitCtx, exitCancel := context.WithCancel(context.Background())
-		stopCh := c.eventMonitor.startExitMonitor(exitCtx, id, task.Pid(), exitCh)
+		stopCh := c.eventMonitor.startSandboxExitMonitor(exitCtx, id, task.Pid(), exitCh)
 		defer func() {
 			exitCancel()
 			// This ensures that exit monitor is stopped before
@@ -165,7 +169,8 @@ func (c *criService) waitSandboxStop(ctx context.Context, sandbox sandboxstore.S
 
 // teardownPodNetwork removes the network from the pod
 func (c *criService) teardownPodNetwork(ctx context.Context, sandbox sandboxstore.Sandbox) error {
-	if c.netPlugin == nil {
+	netPlugin := c.getNetworkPlugin(sandbox.RuntimeHandler)
+	if netPlugin == nil {
 		return errors.New("cni config not initialized")
 	}
 
@@ -179,7 +184,7 @@ func (c *criService) teardownPodNetwork(ctx context.Context, sandbox sandboxstor
 		return errors.Wrap(err, "get cni namespace options")
 	}
 
-	return c.netPlugin.Remove(ctx, id, path, opts...)
+	return netPlugin.Remove(ctx, id, path, opts...)
 }
 
 // cleanupUnknownSandbox cleanup stopped sandbox in unknown state.

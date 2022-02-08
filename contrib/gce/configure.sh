@@ -121,7 +121,7 @@ else
   pull_refs=$(fetch_metadata "${PULL_REFS_METADATA}")
   if [ ! -z "${pull_refs}" ]; then
     deploy_dir=$(echo "${pull_refs}" | sha1sum | awk '{print $1}')
-    deploy_path="${deploy_path}/${deploy_dir}"
+    deploy_path="${deploy_path}/containerd/${deploy_dir}"
   fi
 
   # TODO(random-liu): Put version into the metadata instead of
@@ -134,7 +134,7 @@ TARBALL_GCS_NAME="${pkg_prefix}-${version}.linux-amd64.tar.gz"
 # TARBALL_GCS_PATH is the path to download cri-containerd tarball for node e2e.
 TARBALL_GCS_PATH="https://storage.googleapis.com/${deploy_path}/${TARBALL_GCS_NAME}"
 # TARBALL is the name of the tarball after being downloaded.
-TARBALL="cri-containerd.tar.gz"
+TARBALL="containerd.tar.gz"
 # CONTAINERD_TAR_SHA1 is the sha1sum of containerd tarball.
 tar_sha1="${CONTAINERD_TAR_SHA1:-""}"
 
@@ -176,6 +176,8 @@ if [ "${KUBERNETES_MASTER:-}" != "true" ]; then
     cni_template_path=""
   fi
 fi
+# Use systemd cgroup if specified in env
+systemdCgroup="${CONTAINERD_SYSTEMD_CGROUP:-"false"}"
 log_level="${CONTAINERD_LOG_LEVEL:-"info"}"
 max_container_log_line="${CONTAINERD_MAX_CONTAINER_LOG_LINE:-16384}"
 cat > ${config_path} <<EOF
@@ -204,6 +206,7 @@ disabled_plugins = ["io.containerd.internal.v1.restart"]
   runtime_type = "io.containerd.runc.v2"
 [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc.options]
   BinaryName = "${CONTAINERD_HOME}/usr/local/sbin/runc"
+  SystemdCgroup = ${systemdCgroup}
 EOF
 chmod 644 "${config_path}"
 

@@ -19,13 +19,16 @@ package server
 import (
 	"encoding/json"
 	"math"
+	"path/filepath"
 	goruntime "runtime"
 	"strings"
+	"time"
 
 	"github.com/containerd/containerd"
 	containerdio "github.com/containerd/containerd/cio"
 	"github.com/containerd/containerd/errdefs"
 	"github.com/containerd/containerd/log"
+	"github.com/containerd/containerd/snapshots"
 	cni "github.com/containerd/go-cni"
 	"github.com/containerd/nri"
 	v1 "github.com/containerd/nri/types/v1"
@@ -34,7 +37,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/net/context"
-	runtime "k8s.io/cri-api/pkg/apis/runtime/v1alpha2"
+	runtime "k8s.io/cri-api/pkg/apis/runtime/v1"
 
 	"github.com/containerd/containerd/pkg/cri/annotations"
 	criconfig "github.com/containerd/containerd/pkg/cri/config"
@@ -44,7 +47,6 @@ import (
 	"github.com/containerd/containerd/pkg/cri/util"
 	ctrdutil "github.com/containerd/containerd/pkg/cri/util"
 	"github.com/containerd/containerd/pkg/netns"
-	"github.com/containerd/containerd/snapshots"
 	selinux "github.com/opencontainers/selinux/go-selinux"
 )
 
@@ -66,7 +68,7 @@ func (c *criService) RunPodSandbox(ctx context.Context, r *runtime.RunPodSandbox
 		return nil, errors.New("sandbox config must include metadata")
 	}
 	name := makeSandboxName(metadata)
-	log.G(ctx).Debugf("Generated id %q for sandbox %q", id, name)
+	log.G(ctx).WithField("podsandboxid", id).Debugf("generated id for sandbox name %q", name)
 	// Reserve the sandbox name to avoid concurrent `RunPodSandbox` request starting the
 	// same sandbox.
 	if err := c.sandboxNameIndex.Reserve(name, id); err != nil {
@@ -106,29 +108,42 @@ func (c *criService) RunPodSandbox(ctx context.Context, r *runtime.RunPodSandbox
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to get sandbox runtime")
 	}
-	log.G(ctx).Debugf("Use OCI %+v for sandbox %q", ociRuntime, id)
+	log.G(ctx).WithField("podsandboxid", id).Debugf("use OCI runtime %+v", ociRuntime)
 
 	podNetwork := true
-	// Pod network is always needed on windows.
+
 	if goruntime.GOOS != "windows" &&
 		config.GetLinux().GetSecurityContext().GetNamespaceOptions().GetNetwork() == runtime.NamespaceMode_NODE {
 		// Pod network is not needed on linux with host network.
 		podNetwork = false
 	}
+	if goruntime.GOOS == "windows" &&
+		config.GetWindows().GetSecurityContext().GetHostProcess() {
+		//Windows HostProcess pods can only run on the host network
+		podNetwork = false
+	}
+
 	if podNetwork {
+		netStart := time.Now()
 		// If it is not in host network namespace then create a namespace and set the sandbox
 		// handle. NetNSPath in sandbox metadata and NetNS is non empty only for non host network
 		// namespaces. If the pod is in host network namespace then both are empty and should not
 		// be used.
-		sandbox.NetNS, err = netns.NewNetNS()
+		var netnsMountDir = "/var/run/netns"
+		if c.config.NetNSMountsUnderStateDir {
+			netnsMountDir = filepath.Join(c.config.StateDir, "netns")
+		}
+		sandbox.NetNS, err = netns.NewNetNS(netnsMountDir)
 		if err != nil {
 			return nil, errors.Wrapf(err, "failed to create network namespace for sandbox %q", id)
 		}
 		sandbox.NetNSPath = sandbox.NetNS.GetPath()
 		defer func() {
 			if retErr != nil {
+				deferCtx, deferCancel := ctrdutil.DeferContext()
+				defer deferCancel()
 				// Teardown network if an error is returned.
-				if err := c.teardownPodNetwork(ctx, sandbox); err != nil {
+				if err := c.teardownPodNetwork(deferCtx, sandbox); err != nil {
 					log.G(ctx).WithError(err).Errorf("Failed to destroy network for sandbox %q", id)
 				}
 
@@ -150,8 +165,10 @@ func (c *criService) RunPodSandbox(ctx context.Context, r *runtime.RunPodSandbox
 		if err := c.setupPodNetwork(ctx, &sandbox); err != nil {
 			return nil, errors.Wrapf(err, "failed to setup network for sandbox %q", id)
 		}
+		sandboxCreateNetworkTimer.UpdateSince(netStart)
 	}
 
+	runtimeStart := time.Now()
 	// Create sandbox container.
 	// NOTE: sandboxContainerSpec SHOULD NOT have side
 	// effect, e.g. accessing/creating files, so that we can test
@@ -160,7 +177,7 @@ func (c *criService) RunPodSandbox(ctx context.Context, r *runtime.RunPodSandbox
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to generate sandbox container spec")
 	}
-	log.G(ctx).Debugf("Sandbox container %q spec: %#+v", id, spew.NewFormatter(spec))
+	log.G(ctx).WithField("podsandboxid", id).Debugf("sandbox container spec: %#+v", spew.NewFormatter(spec))
 	sandbox.ProcessLabel = spec.Process.SelinuxLabel
 	defer func() {
 		if retErr != nil {
@@ -185,13 +202,12 @@ func (c *criService) RunPodSandbox(ctx context.Context, r *runtime.RunPodSandbox
 		return nil, errors.Wrap(err, "failed to generate sanbdox container spec options")
 	}
 
-	sandboxLabels := buildLabels(config.Labels, containerKindSandbox)
+	sandboxLabels := buildLabels(config.Labels, image.ImageSpec.Config.Labels, containerKindSandbox)
 
 	runtimeOpts, err := generateRuntimeOptions(ociRuntime, c.config)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to generate runtime options")
 	}
-
 	snapshotterOpt := snapshots.WithLabels(snapshots.FilterInheritedLabels(config.Annotations))
 	opts := []containerd.NewContainerOpts{
 		containerd.WithSnapshotter(c.config.ContainerdConfig.Snapshotter),
@@ -269,6 +285,9 @@ func (c *criService) RunPodSandbox(ctx context.Context, r *runtime.RunPodSandbox
 		id, name)
 
 	taskOpts := c.taskOpts(ociRuntime.Type)
+	if ociRuntime.Path != "" {
+		taskOpts = append(taskOpts, containerd.WithRuntimePath(ociRuntime.Path))
+	}
 	// We don't need stdio for sandbox container.
 	task, err := container.NewTask(ctx, containerdio.NullIO, taskOpts...)
 	if err != nil {
@@ -331,19 +350,37 @@ func (c *criService) RunPodSandbox(ctx context.Context, r *runtime.RunPodSandbox
 	//
 	// TaskOOM from containerd may come before sandbox is added to store,
 	// but we don't care about sandbox TaskOOM right now, so it is fine.
-	c.eventMonitor.startExitMonitor(context.Background(), id, task.Pid(), exitCh)
+	c.eventMonitor.startSandboxExitMonitor(context.Background(), id, task.Pid(), exitCh)
+
+	sandboxRuntimeCreateTimer.WithValues(ociRuntime.Type).UpdateSince(runtimeStart)
 
 	return &runtime.RunPodSandboxResponse{PodSandboxId: id}, nil
+}
+
+// getNetworkPlugin returns the network plugin to be used by the runtime class
+// defaults to the global CNI options in the CRI config
+func (c *criService) getNetworkPlugin(runtimeClass string) cni.CNI {
+	if c.netPlugin == nil {
+		return nil
+	}
+	i, ok := c.netPlugin[runtimeClass]
+	if !ok {
+		if i, ok = c.netPlugin[defaultNetworkPlugin]; !ok {
+			return nil
+		}
+	}
+	return i
 }
 
 // setupPodNetwork setups up the network for a pod
 func (c *criService) setupPodNetwork(ctx context.Context, sandbox *sandboxstore.Sandbox) error {
 	var (
-		id     = sandbox.ID
-		config = sandbox.Config
-		path   = sandbox.NetNSPath
+		id        = sandbox.ID
+		config    = sandbox.Config
+		path      = sandbox.NetNSPath
+		netPlugin = c.getNetworkPlugin(sandbox.RuntimeHandler)
 	)
-	if c.netPlugin == nil {
+	if netPlugin == nil {
 		return errors.New("cni config not initialized")
 	}
 
@@ -351,15 +388,15 @@ func (c *criService) setupPodNetwork(ctx context.Context, sandbox *sandboxstore.
 	if err != nil {
 		return errors.Wrap(err, "get cni namespace options")
 	}
-
-	result, err := c.netPlugin.Setup(ctx, id, path, opts...)
+	log.G(ctx).WithField("podsandboxid", id).Debugf("begin cni setup")
+	result, err := netPlugin.Setup(ctx, id, path, opts...)
 	if err != nil {
 		return err
 	}
 	logDebugCNIResult(ctx, id, result)
 	// Check if the default interface has IP config
 	if configs, ok := result.Interfaces[defaultIfName]; ok && len(configs.IPConfigs) > 0 {
-		sandbox.IP, sandbox.AdditionalIPs = selectPodIPs(configs.IPConfigs)
+		sandbox.IP, sandbox.AdditionalIPs = selectPodIPs(ctx, configs.IPConfigs, c.config.IPPreference)
 		sandbox.CNIResult = result
 		return nil
 	}
@@ -370,6 +407,7 @@ func (c *criService) setupPodNetwork(ctx context.Context, sandbox *sandboxstore.
 func cniNamespaceOpts(id string, config *runtime.PodSandboxConfig) ([]cni.NamespaceOpts, error) {
 	opts := []cni.NamespaceOpts{
 		cni.WithLabels(toCNILabels(id, config)),
+		cni.WithCapability(annotations.PodAnnotations, config.Annotations),
 	}
 
 	portMappings := toCNIPortMappings(config.GetPortMappings())
@@ -401,6 +439,7 @@ func toCNILabels(id string, config *runtime.PodSandboxConfig) map[string]string 
 		"K8S_POD_NAMESPACE":          config.GetMetadata().GetNamespace(),
 		"K8S_POD_NAME":               config.GetMetadata().GetName(),
 		"K8S_POD_INFRA_CONTAINER_ID": id,
+		"K8S_POD_UID":                config.GetMetadata().GetUid(),
 		"IgnoreUnknown":              "1",
 	}
 }
@@ -460,28 +499,46 @@ func toCNIDNS(dns *runtime.DNSConfig) *cni.DNS {
 	}
 }
 
-// selectPodIPs select an ip from the ip list. It prefers ipv4 more than ipv6
-// and returns the additional ips
-// TODO(random-liu): Revisit the ip order in the ipv6 beta stage. (cri#1278)
-func selectPodIPs(ipConfigs []*cni.IPConfig) (string, []string) {
-	var (
-		additionalIPs []string
-		ip            string
-	)
-	for _, c := range ipConfigs {
-		if c.IP.To4() != nil && ip == "" {
-			ip = c.IP.String()
-		} else {
-			additionalIPs = append(additionalIPs, c.IP.String())
+// selectPodIPs select an ip from the ip list.
+func selectPodIPs(ctx context.Context, configs []*cni.IPConfig, preference string) (string, []string) {
+	if len(configs) == 1 {
+		return ipString(configs[0]), nil
+	}
+	toStrings := func(ips []*cni.IPConfig) (o []string) {
+		for _, i := range ips {
+			o = append(o, ipString(i))
 		}
+		return o
 	}
-	if ip != "" {
-		return ip, additionalIPs
+	var extra []string
+	switch preference {
+	default:
+		if preference != "ipv4" && preference != "" {
+			log.G(ctx).WithField("ip_pref", preference).Warn("invalid ip_pref, falling back to ipv4")
+		}
+		for i, ip := range configs {
+			if ip.IP.To4() != nil {
+				return ipString(ip), append(extra, toStrings(configs[i+1:])...)
+			}
+			extra = append(extra, ipString(ip))
+		}
+	case "ipv6":
+		for i, ip := range configs {
+			if ip.IP.To16() != nil {
+				return ipString(ip), append(extra, toStrings(configs[i+1:])...)
+			}
+			extra = append(extra, ipString(ip))
+		}
+	case "cni":
+		// use func default return
 	}
-	if len(ipConfigs) == 1 {
-		return additionalIPs[0], nil
-	}
-	return additionalIPs[0], additionalIPs[1:]
+
+	all := toStrings(configs)
+	return all[0], all[1:]
+}
+
+func ipString(ip *cni.IPConfig) string {
+	return ip.IP.String()
 }
 
 // untrustedWorkload returns true if the sandbox contains untrusted workload.
@@ -538,14 +595,14 @@ func (c *criService) getSandboxRuntime(config *runtime.PodSandboxConfig, runtime
 	return handler, nil
 }
 
-func logDebugCNIResult(ctx context.Context, sandboxID string, result *cni.CNIResult) {
+func logDebugCNIResult(ctx context.Context, sandboxID string, result *cni.Result) {
 	if logrus.GetLevel() < logrus.DebugLevel {
 		return
 	}
 	cniResult, err := json.Marshal(result)
 	if err != nil {
-		log.G(ctx).WithError(err).Errorf("Failed to marshal CNI result for sandbox %q: %v", sandboxID, err)
+		log.G(ctx).WithField("podsandboxid", sandboxID).WithError(err).Errorf("Failed to marshal CNI result: %v", err)
 		return
 	}
-	log.G(ctx).Debugf("cni result for sandbox %q: %s", sandboxID, string(cniResult))
+	log.G(ctx).WithField("podsandboxid", sandboxID).Debugf("cni result: %s", string(cniResult))
 }

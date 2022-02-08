@@ -1,3 +1,4 @@
+//go:build linux
 // +build linux
 
 /*
@@ -21,7 +22,6 @@ package runc
 import (
 	"context"
 	"encoding/json"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"sync"
@@ -42,14 +42,14 @@ import (
 )
 
 // NewContainer returns a new runc container
-func NewContainer(ctx context.Context, platform stdio.Platform, r *task.CreateTaskRequest) (*Container, error) {
+func NewContainer(ctx context.Context, platform stdio.Platform, r *task.CreateTaskRequest) (_ *Container, retErr error) {
 	ns, err := namespaces.NamespaceRequired(ctx)
 	if err != nil {
 		return nil, errors.Wrap(err, "create namespace")
 	}
 
 	var opts options.Options
-	if r.Options != nil {
+	if r.Options != nil && r.Options.GetTypeUrl() != "" {
 		v, err := typeurl.UnmarshalAny(r.Options)
 		if err != nil {
 			return nil, err
@@ -97,9 +97,9 @@ func NewContainer(ctx context.Context, platform stdio.Platform, r *task.CreateTa
 		return nil, err
 	}
 	defer func() {
-		if err != nil {
-			if err2 := mount.UnmountAll(rootfs, 0); err2 != nil {
-				logrus.WithError(err2).Warn("failed to cleanup rootfs mount")
+		if retErr != nil {
+			if err := mount.UnmountAll(rootfs, 0); err != nil {
+				logrus.WithError(err).Warn("failed to cleanup rootfs mount")
 			}
 		}
 	}()
@@ -174,7 +174,7 @@ func ReadOptions(path string) (*options.Options, error) {
 		return nil, err
 	}
 
-	data, err := ioutil.ReadFile(filePath)
+	data, err := os.ReadFile(filePath)
 	if err != nil {
 		return nil, err
 	}
@@ -191,12 +191,12 @@ func WriteOptions(path string, opts options.Options) error {
 	if err != nil {
 		return err
 	}
-	return ioutil.WriteFile(filepath.Join(path, optionsFilename), data, 0600)
+	return os.WriteFile(filepath.Join(path, optionsFilename), data, 0600)
 }
 
 // ReadRuntime reads the runtime information from the path
 func ReadRuntime(path string) (string, error) {
-	data, err := ioutil.ReadFile(filepath.Join(path, "runtime"))
+	data, err := os.ReadFile(filepath.Join(path, "runtime"))
 	if err != nil {
 		return "", err
 	}
@@ -205,7 +205,7 @@ func ReadRuntime(path string) (string, error) {
 
 // WriteRuntime writes the runtime information into the path
 func WriteRuntime(path, runtime string) error {
-	return ioutil.WriteFile(filepath.Join(path, "runtime"), []byte(runtime), 0600)
+	return os.WriteFile(filepath.Join(path, "runtime"), []byte(runtime), 0600)
 }
 
 func newInit(ctx context.Context, path, workDir, namespace string, platform stdio.Platform,

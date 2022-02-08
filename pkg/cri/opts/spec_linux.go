@@ -19,7 +19,6 @@ package opts
 import (
 	"context"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"sort"
@@ -32,13 +31,12 @@ import (
 	"github.com/containerd/containerd/log"
 	"github.com/containerd/containerd/mount"
 	"github.com/containerd/containerd/oci"
-	"github.com/opencontainers/runc/libcontainer/devices"
 	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/opencontainers/selinux/go-selinux/label"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/sys/unix"
-	runtime "k8s.io/cri-api/pkg/apis/runtime/v1alpha2"
+	runtime "k8s.io/cri-api/pkg/apis/runtime/v1"
 
 	"github.com/containerd/containerd/pkg/cri/util"
 	osinterface "github.com/containerd/containerd/pkg/os"
@@ -75,22 +73,6 @@ func mergeGids(gids1, gids2 []uint32) []uint32 {
 	}
 	sort.Slice(gids, func(i, j int) bool { return gids[i] < gids[j] })
 	return gids
-}
-
-// WithoutRunMount removes the `/run` inside the spec
-func WithoutRunMount(_ context.Context, _ oci.Client, c *containers.Container, s *runtimespec.Spec) error {
-	var (
-		mounts  []runtimespec.Mount
-		current = s.Mounts
-	)
-	for _, m := range current {
-		if filepath.Clean(m.Destination) == "/run" {
-			continue
-		}
-		mounts = append(mounts, m)
-	}
-	s.Mounts = mounts
-	return nil
 }
 
 // WithoutDefaultSecuritySettings removes the default security settings generated on a spec
@@ -278,18 +260,30 @@ func ensureSharedOrSlave(path string, lookupMount func(string) (mount.Info, erro
 	return errors.Errorf("path %q is mounted on %q but it is not a shared or slave mount", path, mountInfo.Mountpoint)
 }
 
-func addDevice(s *runtimespec.Spec, rd runtimespec.LinuxDevice) {
-	for i, dev := range s.Linux.Devices {
-		if dev.Path == rd.Path {
-			s.Linux.Devices[i] = rd
-			return
-		}
+// getDeviceUserGroupID() is used to find the right uid/gid
+// value for the device node created in the container namespace.
+// The runtime executes mknod() and chmod()s the created
+// device with the values returned here.
+//
+// On Linux, uid and gid are sufficient and the user/groupname do not
+// need to be resolved.
+//
+// TODO(mythi): In case of user namespaces, the runtime simply bind
+// mounts the devices from the host. Additional logic is needed
+// to check that the runtimes effective UID/GID on the host has the
+// permissions to access the device node and/or the right user namespace
+// mappings are created.
+//
+// Ref: https://github.com/kubernetes/kubernetes/issues/92211
+func getDeviceUserGroupID(runAsVal *runtime.Int64Value) uint32 {
+	if runAsVal != nil {
+		return uint32(runAsVal.GetValue())
 	}
-	s.Linux.Devices = append(s.Linux.Devices, rd)
+	return 0
 }
 
 // WithDevices sets the provided devices onto the container spec
-func WithDevices(osi osinterface.OS, config *runtime.ContainerConfig) oci.SpecOpts {
+func WithDevices(osi osinterface.OS, config *runtime.ContainerConfig, enableDeviceOwnershipFromSecurityContext bool) oci.SpecOpts {
 	return func(ctx context.Context, client oci.Client, c *containers.Container, s *runtimespec.Spec) (err error) {
 		if s.Linux == nil {
 			s.Linux = &runtimespec.Linux{}
@@ -297,40 +291,44 @@ func WithDevices(osi osinterface.OS, config *runtime.ContainerConfig) oci.SpecOp
 		if s.Linux.Resources == nil {
 			s.Linux.Resources = &runtimespec.LinuxResources{}
 		}
+
+		oldDevices := len(s.Linux.Devices)
+
 		for _, device := range config.GetDevices() {
 			path, err := osi.ResolveSymbolicLink(device.HostPath)
 			if err != nil {
 				return err
 			}
-			dev, err := devices.DeviceFromPath(path, device.Permissions)
-			if err != nil {
+
+			o := oci.WithDevices(path, device.ContainerPath, device.Permissions)
+			if err := o(ctx, client, c, s); err != nil {
 				return err
 			}
-			rd := runtimespec.LinuxDevice{
-				Path:  device.ContainerPath,
-				Type:  string(dev.Type),
-				Major: dev.Major,
-				Minor: dev.Minor,
-				UID:   &dev.Uid,
-				GID:   &dev.Gid,
+		}
+
+		if enableDeviceOwnershipFromSecurityContext {
+			UID := getDeviceUserGroupID(config.GetLinux().GetSecurityContext().GetRunAsUser())
+			GID := getDeviceUserGroupID(config.GetLinux().GetSecurityContext().GetRunAsGroup())
+			// Loop all new devices added by oci.WithDevices() to update their
+			// dev.UID/dev.GID.
+			//
+			// non-zero UID/GID from SecurityContext is used to override host's
+			// device UID/GID for the container.
+			for idx := oldDevices; idx < len(s.Linux.Devices); idx++ {
+				if UID != 0 {
+					*s.Linux.Devices[idx].UID = UID
+				}
+				if GID != 0 {
+					*s.Linux.Devices[idx].GID = GID
+				}
 			}
-
-			addDevice(s, rd)
-
-			s.Linux.Resources.Devices = append(s.Linux.Resources.Devices, runtimespec.LinuxDeviceCgroup{
-				Allow:  true,
-				Type:   string(dev.Type),
-				Major:  &dev.Major,
-				Minor:  &dev.Minor,
-				Access: string(dev.Permissions),
-			})
 		}
 		return nil
 	}
 }
 
-// WithCapabilities sets the provided capabilties from the security context
-func WithCapabilities(sc *runtime.LinuxContainerSecurityContext) oci.SpecOpts {
+// WithCapabilities sets the provided capabilities from the security context
+func WithCapabilities(sc *runtime.LinuxContainerSecurityContext, allCaps []string) oci.SpecOpts {
 	capabilities := sc.GetCapabilities()
 	if capabilities == nil {
 		return nullOpt
@@ -342,7 +340,7 @@ func WithCapabilities(sc *runtime.LinuxContainerSecurityContext) oci.SpecOpts {
 	// AddCapabilities: []string{"ALL"}, DropCapabilities: []string{"CHOWN"}
 	// will be all capabilities without `CAP_CHOWN`.
 	if util.InStringSlice(capabilities.GetAddCapabilities(), "ALL") {
-		opts = append(opts, oci.WithAllCapabilities)
+		opts = append(opts, oci.WithCapabilities(allCaps))
 	}
 	if util.InStringSlice(capabilities.GetDropCapabilities(), "ALL") {
 		opts = append(opts, oci.WithCapabilities(nil))
@@ -428,6 +426,7 @@ func WithResources(resources *runtime.LinuxContainerResources, tolerateMissingHu
 			q         = resources.GetCpuQuota()
 			shares    = uint64(resources.GetCpuShares())
 			limit     = resources.GetMemoryLimitInBytes()
+			swapLimit = resources.GetMemorySwapLimitInBytes()
 			hugepages = resources.GetHugepageLimits()
 		)
 
@@ -449,6 +448,10 @@ func WithResources(resources *runtime.LinuxContainerResources, tolerateMissingHu
 		if limit != 0 {
 			s.Linux.Resources.Memory.Limit = &limit
 		}
+		if swapLimit != 0 {
+			s.Linux.Resources.Memory.Swap = &swapLimit
+		}
+
 		if !disableHugetlbController {
 			if isHugetlbControllerPresent() {
 				for _, limit := range hugepages {
@@ -459,10 +462,19 @@ func WithResources(resources *runtime.LinuxContainerResources, tolerateMissingHu
 				}
 			} else {
 				if !tolerateMissingHugetlbController {
-					return errors.Errorf("huge pages limits are specified but hugetlb cgroup controller is missing. " +
+					return errors.New("huge pages limits are specified but hugetlb cgroup controller is missing. " +
 						"Please set tolerate_missing_hugetlb_controller to `true` to ignore this error")
 				}
 				logrus.Warn("hugetlb cgroup controller is absent. skipping huge pages limits")
+			}
+		}
+
+		if unified := resources.GetUnified(); unified != nil {
+			if s.Linux.Resources.Unified == nil {
+				s.Linux.Resources.Unified = make(map[string]string)
+			}
+			for k, v := range unified {
+				s.Linux.Resources.Unified[k] = v
 			}
 		}
 		return nil
@@ -501,7 +513,7 @@ var (
 // cgroup v1.
 func cgroupv1HasHugetlb() (bool, error) {
 	_cgroupv1HasHugetlbOnce.Do(func() {
-		if _, err := ioutil.ReadDir("/sys/fs/cgroup/hugetlb"); err != nil {
+		if _, err := os.ReadDir("/sys/fs/cgroup/hugetlb"); err != nil {
 			_cgroupv1HasHugetlbErr = errors.Wrap(err, "readdir /sys/fs/cgroup/hugetlb")
 			_cgroupv1HasHugetlb = false
 		} else {
@@ -516,7 +528,7 @@ func cgroupv1HasHugetlb() (bool, error) {
 // cgroup v2.
 func cgroupv2HasHugetlb() (bool, error) {
 	_cgroupv2HasHugetlbOnce.Do(func() {
-		controllers, err := ioutil.ReadFile("/sys/fs/cgroup/cgroup.controllers")
+		controllers, err := os.ReadFile("/sys/fs/cgroup/cgroup.controllers")
 		if err != nil {
 			_cgroupv2HasHugetlbErr = errors.Wrap(err, "read /sys/fs/cgroup/cgroup.controllers")
 			return
@@ -612,16 +624,16 @@ func WithSupplementalGroups(groups []int64) oci.SpecOpts {
 }
 
 // WithPodNamespaces sets the pod namespaces for the container
-func WithPodNamespaces(config *runtime.LinuxContainerSecurityContext, pid uint32) oci.SpecOpts {
+func WithPodNamespaces(config *runtime.LinuxContainerSecurityContext, sandboxPid uint32, targetPid uint32) oci.SpecOpts {
 	namespaces := config.GetNamespaceOptions()
 
 	opts := []oci.SpecOpts{
-		oci.WithLinuxNamespace(runtimespec.LinuxNamespace{Type: runtimespec.NetworkNamespace, Path: GetNetworkNamespace(pid)}),
-		oci.WithLinuxNamespace(runtimespec.LinuxNamespace{Type: runtimespec.IPCNamespace, Path: GetIPCNamespace(pid)}),
-		oci.WithLinuxNamespace(runtimespec.LinuxNamespace{Type: runtimespec.UTSNamespace, Path: GetUTSNamespace(pid)}),
+		oci.WithLinuxNamespace(runtimespec.LinuxNamespace{Type: runtimespec.NetworkNamespace, Path: GetNetworkNamespace(sandboxPid)}),
+		oci.WithLinuxNamespace(runtimespec.LinuxNamespace{Type: runtimespec.IPCNamespace, Path: GetIPCNamespace(sandboxPid)}),
+		oci.WithLinuxNamespace(runtimespec.LinuxNamespace{Type: runtimespec.UTSNamespace, Path: GetUTSNamespace(sandboxPid)}),
 	}
 	if namespaces.GetPid() != runtime.NamespaceMode_CONTAINER {
-		opts = append(opts, oci.WithLinuxNamespace(runtimespec.LinuxNamespace{Type: runtimespec.PIDNamespace, Path: GetPIDNamespace(pid)}))
+		opts = append(opts, oci.WithLinuxNamespace(runtimespec.LinuxNamespace{Type: runtimespec.PIDNamespace, Path: GetPIDNamespace(targetPid)}))
 	}
 	return oci.Compose(opts...)
 }
@@ -664,7 +676,7 @@ func nullOpt(_ context.Context, _ oci.Client, _ *containers.Container, _ *runtim
 }
 
 func getCurrentOOMScoreAdj() (int, error) {
-	b, err := ioutil.ReadFile("/proc/self/oom_score_adj")
+	b, err := os.ReadFile("/proc/self/oom_score_adj")
 	if err != nil {
 		return 0, errors.Wrap(err, "could not get the daemon oom_score_adj")
 	}

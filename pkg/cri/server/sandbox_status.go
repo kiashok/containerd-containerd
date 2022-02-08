@@ -26,7 +26,7 @@ import (
 	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/pkg/errors"
 	"golang.org/x/net/context"
-	runtime "k8s.io/cri-api/pkg/apis/runtime/v1alpha2"
+	runtime "k8s.io/cri-api/pkg/apis/runtime/v1"
 
 	sandboxstore "github.com/containerd/containerd/pkg/cri/store/sandbox"
 )
@@ -74,6 +74,9 @@ func (c *criService) getIPs(sandbox sandboxstore.Sandbox) (string, []string, err
 		config.GetLinux().GetSecurityContext().GetNamespaceOptions().GetNetwork() == runtime.NamespaceMode_NODE {
 		// For sandboxes using the node network we are not
 		// responsible for reporting the IP.
+		return "", nil, nil
+	}
+	if goruntime.GOOS == "windows" && config.GetWindows().GetSecurityContext().GetHostProcess() {
 		return "", nil, nil
 	}
 
@@ -139,7 +142,7 @@ type SandboxInfo struct {
 	RuntimeOptions interface{}               `json:"runtimeOptions"`
 	Config         *runtime.PodSandboxConfig `json:"config"`
 	RuntimeSpec    *runtimespec.Spec         `json:"runtimeSpec"`
-	CNIResult      *cni.CNIResult            `json:"cniResult"`
+	CNIResult      *cni.Result               `json:"cniResult"`
 }
 
 // toCRISandboxInfo converts internal container object information to CRI sandbox status response info map.

@@ -18,7 +18,6 @@ package native
 
 import (
 	"context"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 
@@ -203,7 +202,7 @@ func (o *snapshotter) Remove(ctx context.Context, key string) (err error) {
 		if renamed != "" {
 			if err1 := os.Rename(renamed, path); err1 != nil {
 				// May cause inconsistent data on disk
-				log.G(ctx).WithError(err1).WithField("path", renamed).Errorf("failed to rename after failed commit")
+				log.G(ctx).WithError(err1).WithField("path", renamed).Error("failed to rename after failed commit")
 			}
 		}
 		return errors.Wrap(err, "failed to commit")
@@ -234,7 +233,7 @@ func (o *snapshotter) createSnapshot(ctx context.Context, kind snapshots.Kind, k
 	)
 
 	if kind == snapshots.KindActive || parent == "" {
-		td, err = ioutil.TempDir(filepath.Join(o.root, "snapshots"), "new-")
+		td, err = os.MkdirTemp(filepath.Join(o.root, "snapshots"), "new-")
 		if err != nil {
 			return nil, errors.Wrap(err, "failed to create temp dir")
 		}
@@ -327,12 +326,9 @@ func (o *snapshotter) mounts(s storage.Snapshot) []mount.Mount {
 
 	return []mount.Mount{
 		{
-			Source: source,
-			Type:   "bind",
-			Options: []string{
-				roFlag,
-				"rbind",
-			},
+			Source:  source,
+			Type:    mountType,
+			Options: append(defaultMountOptions, roFlag),
 		},
 	}
 }

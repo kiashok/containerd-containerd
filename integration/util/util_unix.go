@@ -1,3 +1,4 @@
+//go:build freebsd || linux || darwin
 // +build freebsd linux darwin
 
 /*
@@ -37,14 +38,12 @@ package util
 import (
 	"context"
 	"fmt"
-	"io/ioutil"
 	"net"
 	"net/url"
 	"os"
 	"path/filepath"
 
 	"golang.org/x/sys/unix"
-	"k8s.io/klog/v2"
 )
 
 const (
@@ -73,7 +72,7 @@ func CreateListener(endpoint string) (net.Listener, error) {
 	}
 
 	// Create the socket on a tempfile and move it to the destination socket to handle improprer cleanup
-	file, err := ioutil.TempFile(filepath.Dir(addr), "")
+	file, err := os.CreateTemp(filepath.Dir(addr), "")
 	if err != nil {
 		return nil, fmt.Errorf("failed to create temporary file: %v", err)
 	}
@@ -115,9 +114,6 @@ func parseEndpointWithFallbackProtocol(endpoint string, fallbackProtocol string)
 	if protocol, addr, err = parseEndpoint(endpoint); err != nil && protocol == "" {
 		fallbackEndpoint := fallbackProtocol + "://" + endpoint
 		protocol, addr, err = parseEndpoint(fallbackEndpoint)
-		if err == nil {
-			klog.Warningf("Using %q as endpoint is deprecated, please consider using full url format %q.", endpoint, fallbackEndpoint)
-		}
 	}
 	return
 }

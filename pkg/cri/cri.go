@@ -41,7 +41,6 @@ import (
 
 	criconfig "github.com/containerd/containerd/pkg/cri/config"
 	"github.com/containerd/containerd/pkg/cri/constants"
-	criplatforms "github.com/containerd/containerd/pkg/cri/platforms"
 	"github.com/containerd/containerd/pkg/cri/server"
 )
 
@@ -54,6 +53,7 @@ func init() {
 		ID:     "cri",
 		Config: &config,
 		Requires: []plugin.Type{
+			plugin.EventPlugin,
 			plugin.ServicePlugin,
 		},
 		InitFn: initCRIService,
@@ -62,7 +62,7 @@ func init() {
 
 func initCRIService(ic *plugin.InitContext) (interface{}, error) {
 	ic.Meta.Platforms = []imagespec.Platform{platforms.DefaultSpec()}
-	ic.Meta.Exports = map[string]string{"CRIVersion": constants.CRIVersion}
+	ic.Meta.Exports = map[string]string{"CRIVersion": constants.CRIVersion, "CRIVersionAlpha": constants.CRIVersionAlpha}
 	ctx := ic.Context
 	pluginConfig := ic.Config.(*criconfig.PluginConfig)
 	if err := criconfig.ValidatePluginConfig(ctx, pluginConfig); err != nil {
@@ -91,7 +91,7 @@ func initCRIService(ic *plugin.InitContext) (interface{}, error) {
 	client, err := containerd.New(
 		"",
 		containerd.WithDefaultNamespace(constants.K8sContainerdNamespace),
-		containerd.WithDefaultPlatform(criplatforms.Default()),
+		containerd.WithDefaultPlatform(platforms.Default()),
 		containerd.WithServices(servicesOpts...),
 	)
 	if err != nil {
@@ -119,36 +119,41 @@ func getServicesOpts(ic *plugin.InitContext) ([]containerd.ServicesOpt, error) {
 		return nil, errors.Wrap(err, "failed to get service plugin")
 	}
 
+	ep, err := ic.Get(plugin.EventPlugin)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to get event plugin")
+	}
+
 	opts := []containerd.ServicesOpt{
-		containerd.WithEventService(ic.Events),
+		containerd.WithEventService(ep.(containerd.EventService)),
 	}
 	for s, fn := range map[string]func(interface{}) containerd.ServicesOpt{
 		services.ContentService: func(s interface{}) containerd.ServicesOpt {
 			return containerd.WithContentStore(s.(content.Store))
 		},
 		services.ImagesService: func(s interface{}) containerd.ServicesOpt {
-			return containerd.WithImageService(s.(images.ImagesClient))
+			return containerd.WithImageClient(s.(images.ImagesClient))
 		},
 		services.SnapshotsService: func(s interface{}) containerd.ServicesOpt {
 			return containerd.WithSnapshotters(s.(map[string]snapshots.Snapshotter))
 		},
 		services.ContainersService: func(s interface{}) containerd.ServicesOpt {
-			return containerd.WithContainerService(s.(containers.ContainersClient))
+			return containerd.WithContainerClient(s.(containers.ContainersClient))
 		},
 		services.TasksService: func(s interface{}) containerd.ServicesOpt {
-			return containerd.WithTaskService(s.(tasks.TasksClient))
+			return containerd.WithTaskClient(s.(tasks.TasksClient))
 		},
 		services.DiffService: func(s interface{}) containerd.ServicesOpt {
-			return containerd.WithDiffService(s.(diff.DiffClient))
+			return containerd.WithDiffClient(s.(diff.DiffClient))
 		},
 		services.NamespacesService: func(s interface{}) containerd.ServicesOpt {
-			return containerd.WithNamespaceService(s.(namespaces.NamespacesClient))
+			return containerd.WithNamespaceClient(s.(namespaces.NamespacesClient))
 		},
 		services.LeasesService: func(s interface{}) containerd.ServicesOpt {
 			return containerd.WithLeasesService(s.(leases.Manager))
 		},
 		services.IntrospectionService: func(s interface{}) containerd.ServicesOpt {
-			return containerd.WithIntrospectionService(s.(introspectionapi.IntrospectionClient))
+			return containerd.WithIntrospectionClient(s.(introspectionapi.IntrospectionClient))
 		},
 	} {
 		p := plugins[s]

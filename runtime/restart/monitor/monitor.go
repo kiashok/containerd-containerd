@@ -19,6 +19,7 @@ package monitor
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/containerd/containerd"
@@ -62,6 +63,7 @@ func init() {
 	plugin.Register(&plugin.Registration{
 		Type: plugin.InternalPlugin,
 		Requires: []plugin.Type{
+			plugin.EventPlugin,
 			plugin.ServicePlugin,
 		},
 		ID: "restart",
@@ -94,30 +96,36 @@ func getServicesOpts(ic *plugin.InitContext) ([]containerd.ServicesOpt, error) {
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to get service plugin")
 	}
+
+	ep, err := ic.Get(plugin.EventPlugin)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to get event plugin")
+	}
+
 	opts := []containerd.ServicesOpt{
-		containerd.WithEventService(ic.Events),
+		containerd.WithEventService(ep.(containerd.EventService)),
 	}
 	for s, fn := range map[string]func(interface{}) containerd.ServicesOpt{
 		services.ContentService: func(s interface{}) containerd.ServicesOpt {
 			return containerd.WithContentStore(s.(content.Store))
 		},
 		services.ImagesService: func(s interface{}) containerd.ServicesOpt {
-			return containerd.WithImageService(s.(images.ImagesClient))
+			return containerd.WithImageClient(s.(images.ImagesClient))
 		},
 		services.SnapshotsService: func(s interface{}) containerd.ServicesOpt {
 			return containerd.WithSnapshotters(s.(map[string]snapshots.Snapshotter))
 		},
 		services.ContainersService: func(s interface{}) containerd.ServicesOpt {
-			return containerd.WithContainerService(s.(containers.ContainersClient))
+			return containerd.WithContainerClient(s.(containers.ContainersClient))
 		},
 		services.TasksService: func(s interface{}) containerd.ServicesOpt {
-			return containerd.WithTaskService(s.(tasks.TasksClient))
+			return containerd.WithTaskClient(s.(tasks.TasksClient))
 		},
 		services.DiffService: func(s interface{}) containerd.ServicesOpt {
-			return containerd.WithDiffService(s.(diff.DiffClient))
+			return containerd.WithDiffClient(s.(diff.DiffClient))
 		},
 		services.NamespacesService: func(s interface{}) containerd.ServicesOpt {
-			return containerd.WithNamespaceService(s.(namespacesapi.NamespacesClient))
+			return containerd.WithNamespaceClient(s.(namespacesapi.NamespacesClient))
 		},
 		services.LeasesService: func(s interface{}) containerd.ServicesOpt {
 			return containerd.WithLeasesService(s.(leases.Manager))
@@ -152,10 +160,10 @@ func (m *monitor) run(interval time.Duration) {
 		interval = 10 * time.Second
 	}
 	for {
-		time.Sleep(interval)
 		if err := m.reconcile(context.Background()); err != nil {
 			logrus.WithError(err).Error("reconcile")
 		}
+		time.Sleep(interval)
 	}
 }
 
@@ -164,19 +172,33 @@ func (m *monitor) reconcile(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	var wgNSLoop sync.WaitGroup
 	for _, name := range ns {
-		ctx = namespaces.WithNamespace(ctx, name)
-		changes, err := m.monitor(ctx)
-		if err != nil {
-			logrus.WithError(err).Error("monitor for changes")
-			continue
-		}
-		for _, c := range changes {
-			if err := c.apply(ctx, m.client); err != nil {
-				logrus.WithError(err).Error("apply change")
+		name := name
+		wgNSLoop.Add(1)
+		go func() {
+			defer wgNSLoop.Done()
+			ctx := namespaces.WithNamespace(ctx, name)
+			changes, err := m.monitor(ctx)
+			if err != nil {
+				logrus.WithError(err).Error("monitor for changes")
+				return
 			}
-		}
+			var wgChangesLoop sync.WaitGroup
+			for _, c := range changes {
+				c := c
+				wgChangesLoop.Add(1)
+				go func() {
+					defer wgChangesLoop.Done()
+					if err := c.apply(ctx, m.client); err != nil {
+						logrus.WithError(err).Error("apply change")
+					}
+				}()
+			}
+			wgChangesLoop.Wait()
+		}()
 	}
+	wgNSLoop.Wait()
 	return nil
 }
 

@@ -6,7 +6,7 @@ However, if you want to integrate containerd into your project we have an easy t
 
 In this guide we will pull and run a redis server with containerd using the client package.
 We will assume that you are running a modern linux host for this example with a compatible build of `runc`.
-Please refer to [RUNC.md](/RUNC.md) for the currently supported version of `runc`.
+Please refer to [RUNC.md](/docs/RUNC.md) for the currently supported version of `runc`.
 This project requires Go 1.9.x or above.
 If you need to install Go or update your currently installed one, please refer to Go install page at https://golang.org/doc/install.
 
@@ -16,21 +16,7 @@ You can download one of the latest builds for containerd on the [github releases
 If you are using systemd, we have a `containerd.service` file at the root of the repository that you can use.
 
 The daemon also uses a configuration file located in `/etc/containerd/config.toml` for specifying daemon level options.
-A sample configuration file looks like this:
-
-```toml
-oom_score = -999
-
-[debug]
-        level = "debug"
-
-[metrics]
-        address = "127.0.0.1:1338"
-
-[plugins.linux]
-        runtime = "runc"
-        shim_debug = true
-```
+A sample configuration file can be found [here](containerd/docs/man/containerd-config.toml.5.md)
 
 The default configuration can be generated via `containerd config default > /etc/containerd/config.toml`.
 
@@ -428,4 +414,4 @@ redis-server exited with status: 0
 In the end, we really did not write that much code when you use the client package.
 
 I hope this guide helped to get you up and running with containerd.
-Feel free to join the [slack channel](https://dockr.ly/community) if you have any questions and like all things, if you want to help contribute to containerd or this guide, submit a pull request.
+Feel free to join the `#containerd` and `#containerd-dev` slack channels on Cloud Native Computing Foundation's (CNCF) slack - `cloud-native.slack.com` if you have any questions and like all things, if you want to help contribute to containerd or this guide, submit a pull request. [Get Invite to CNCF slack.](https://slack.cncf.io)

@@ -1,3 +1,4 @@
+//go:build !windows && !linux
 // +build !windows,!linux
 
 /*
@@ -21,7 +22,7 @@ package server
 import (
 	"github.com/pkg/errors"
 	"golang.org/x/net/context"
-	runtime "k8s.io/cri-api/pkg/apis/runtime/v1alpha2"
+	runtime "k8s.io/cri-api/pkg/apis/runtime/v1"
 
 	containerstore "github.com/containerd/containerd/pkg/cri/store/container"
 )

@@ -17,24 +17,25 @@
 package server
 
 import (
+	"time"
+
 	"github.com/containerd/containerd"
 	"github.com/containerd/containerd/errdefs"
 	"github.com/containerd/containerd/log"
+
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/net/context"
-	runtime "k8s.io/cri-api/pkg/apis/runtime/v1alpha2"
-
-	"github.com/containerd/containerd/pkg/cri/store"
-	sandboxstore "github.com/containerd/containerd/pkg/cri/store/sandbox"
+	runtime "k8s.io/cri-api/pkg/apis/runtime/v1"
 )
 
 // RemovePodSandbox removes the sandbox. If there are running containers in the
 // sandbox, they should be forcibly removed.
 func (c *criService) RemovePodSandbox(ctx context.Context, r *runtime.RemovePodSandboxRequest) (*runtime.RemovePodSandboxResponse, error) {
+	start := time.Now()
 	sandbox, err := c.sandboxStore.Get(r.GetPodSandboxId())
 	if err != nil {
-		if err != store.ErrNotExist {
+		if !errdefs.IsNotFound(err) {
 			return nil, errors.Wrapf(err, "an error occurred when try to find sandbox %q",
 				r.GetPodSandboxId())
 		}
@@ -46,13 +47,12 @@ func (c *criService) RemovePodSandbox(ctx context.Context, r *runtime.RemovePodS
 	// Use the full sandbox id.
 	id := sandbox.ID
 
-	// If the sandbox is still running or in an unknown state, forcibly stop it.
-	state := sandbox.Status.Get().State
-	if state == sandboxstore.StateReady || state == sandboxstore.StateUnknown {
-		logrus.Infof("Forcibly stopping sandbox %q", id)
-		if err := c.stopPodSandbox(ctx, sandbox); err != nil {
-			return nil, errors.Wrapf(err, "failed to forcibly stop sandbox %q", id)
-		}
+	// If the sandbox is still running, not ready, or in an unknown state, forcibly stop it.
+	// Even if it's in a NotReady state, this will close its network namespace, if open.
+	// This can happen if the task process associated with the Pod died or it was killed.
+	logrus.Infof("Forcibly stopping sandbox %q", id)
+	if err := c.stopPodSandbox(ctx, sandbox); err != nil {
+		return nil, errors.Wrapf(err, "failed to forcibly stop sandbox %q", id)
 	}
 
 	// Return error if sandbox network namespace is not closed yet.
@@ -110,6 +110,8 @@ func (c *criService) RemovePodSandbox(ctx context.Context, r *runtime.RemovePodS
 
 	// Release the sandbox name reserved for the sandbox.
 	c.sandboxNameIndex.ReleaseByKey(id)
+
+	sandboxRemoveTimer.WithValues(sandbox.RuntimeHandler).UpdateSince(start)
 
 	return &runtime.RemovePodSandboxResponse{}, nil
 }
