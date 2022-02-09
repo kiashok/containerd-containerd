@@ -166,7 +166,7 @@ func (s windowsLcowDiff) Apply(ctx context.Context, desc ocispec.Descriptor, mou
 		if msg, ok := config.ProcessorPayloads[diff.LCOWLayerIntegrityEnabled]; ok {
 			val, err := typeurl.UnmarshalAny(msg)
 			if err != nil {
-				return emptyDesc, errors.Wrapf(err, "failed to unmarshal processor payloads")
+				return emptyDesc, fmt.Errorf("failed to unmarshal processor payloads: %w", err)
 			}
 			if str, ok := val.(*types.StringValue); ok && str.Value == "true" {
 				t2e4Opts = append(t2e4Opts, tar2ext4.AppendDMVerity)

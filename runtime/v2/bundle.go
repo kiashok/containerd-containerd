@@ -27,6 +27,7 @@ import (
 	"github.com/containerd/containerd/log"
 	"github.com/containerd/containerd/mount"
 	"github.com/containerd/containerd/namespaces"
+	cioutil "github.com/containerd/containerd/pkg/ioutil"
 )
 
 const configFilename = "config.json"
