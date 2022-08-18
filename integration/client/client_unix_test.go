@@ -26,12 +26,6 @@ import (
 	"github.com/containerd/containerd/platforms"
 )
 
-const (
-	defaultRoot    = "/var/lib/containerd-test"
-	defaultState   = "/run/containerd-test"
-	defaultAddress = "/run/containerd-test/containerd.sock"
-)
-
 var (
 	testImage             = "ghcr.io/containerd/busybox:1.32"
 	testMultiLayeredImage = "ghcr.io/containerd/volume-copy-up:2.1"
