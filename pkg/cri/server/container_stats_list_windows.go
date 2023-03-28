@@ -77,6 +77,10 @@ func (c *criService) containerMetrics(
 				WorkingSetBytes: &runtime.UInt64Value{
 					Value: wstats.Memory.MemoryUsagePrivateWorkingSetBytes,
 				},
+				CommitMemoryBytes: &runtime.UInt64Value{
+					Value: wstats.Memory.MemoryUsageCommitBytes,
+				},
+				//MemoryUsageCommitBytes
 			}
 		}
 	}

@@ -486,6 +486,7 @@ func (in *instrumentedService) ListContainerStats(ctx context.Context, r *runtim
 		}
 	}()
 	res, err = in.c.ListContainerStats(ctrdutil.WithNamespace(ctx), r)
+	logrus.Debugf("ListContainerResponse: %v", res)
 	return res, errdefs.ToGRPC(err)
 }
 

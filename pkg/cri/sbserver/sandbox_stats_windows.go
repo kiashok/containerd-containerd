@@ -284,6 +284,9 @@ func (c *criService) convertToCRIStats(stats *wstats.Statistics) (*runtime.Windo
 				WorkingSetBytes: &runtime.UInt64Value{
 					Value: wstats.Memory.MemoryUsagePrivateWorkingSetBytes,
 				},
+				CommitMemoryBytes: &runtime.UInt64Value{
+					Value: wstats.Memory.MemoryUsageCommitBytes,
+				},
 			}
 		}
 

@@ -47,6 +47,7 @@ func (c *criService) ListContainerStats(
 	if err != nil {
 		return nil, fmt.Errorf("failed to convert to cri containerd stats format: %w", err)
 	}
+	logrus.Debugf("ListContainerResponse: %v", criStats)
 	return criStats, nil
 }
 
