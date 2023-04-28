@@ -111,6 +111,52 @@ func (c *criService) PullImage(ctx context.Context, r *runtime.PullImageRequest)
 	startTime := time.Now()
 
 	imageRef := r.GetImage().GetImage()
+	runtimeHandler := r.GetImage().GetRuntimeHandler()
+	// validate that there is such a runtimeHandler
+	if runtimeHandler == "" {
+		runtimeHandler = c.config.ContainerdConfig.DefaultRuntimeName
+	}
+
+	ociRuntime, ok := c.config.ContainerdConfig.Runtimes[runtimeHandler] // read handler.Runtimes.OSVersion etc
+	if !ok {
+		//criconfig.Runtime{}
+		log.G(ctx).Errorf("failed to get runtime %v", runtimeHandler)
+		return nil, fmt.Errorf("no runtime for %q is configured", runtimeHandler)
+	}
+
+	log.G(ctx).WithField("podsandboxid", id).Debugf("use OCI runtime %+v", ociRuntime)
+
+	runtimeOpts, err := generateRuntimeOptions(ociRuntime, c.config)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate runtime options: %w", err)
+	}
+
+	var sandboxIsolation string
+	var platformMatcher Matcher
+	if ociRuntime.Type == runtimeRunhcsV1 {
+		rhcso := runtimeOpts.(*runhcsoptions.Options)
+		if rhcso.sandboxIsolation != 1 {
+			//process isolate default matcher
+			platformMatcher = windowsmatcher{
+				Platform:        ociRuntime.HostPlatform,
+				osVersionPrefix: ociRuntime.HostPlatform.OSVersion,
+				defaultMatcher: &matcher{
+					Platform: Normalize(ociRuntime.HostPlatform),
+				}
+			}
+		} else {
+			// hyperV matcher
+			platformMatcher = windowshypervmatcher{
+				Platform:        ociRuntime.HostPlatform,
+				osVersionPrefix: ociRuntime.HostPlatform.OSVersion,
+				defaultMatcher: &matcher{
+					Platform: Normalize(ociRuntime.HostPlatform),
+				}
+			}
+		}
+	}
+
+	///
 	namedRef, err := distribution.ParseDockerRef(imageRef)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse image reference %q: %w", imageRef, err)
@@ -154,6 +200,7 @@ func (c *criService) PullImage(ctx context.Context, r *runtime.PullImageRequest)
 		tracing.Attribute("image.ref", ref),
 		tracing.Attribute("snapshotter.name", snapshotter),
 	)
+	// kiashok: maybe create a function here to call specific platform matchers??!!
 	pullOpts := []containerd.RemoteOpt{
 		containerd.WithSchema1Conversion, //nolint:staticcheck // Ignore SA1019. Need to keep deprecated package for compatibility.
 		containerd.WithResolver(resolver),
@@ -164,6 +211,7 @@ func (c *criService) PullImage(ctx context.Context, r *runtime.PullImageRequest)
 		containerd.WithImageHandler(imageHandler),
 		containerd.WithUnpackOpts([]containerd.UnpackOpt{
 			containerd.WithUnpackDuplicationSuppressor(c.unpackDuplicationSuppressor),
+			containerd.WithPlatformMatcher(platforms.MatchComparer{ Matcher: platformMatcher}),
 		}),
 	}
 
@@ -180,7 +228,7 @@ func (c *criService) PullImage(ctx context.Context, r *runtime.PullImageRequest)
 	}
 
 	pullReporter.start(pctx)
-	image, err := c.client.Pull(pctx, ref, pullOpts...)
+	image, err := c.client.Pull(pctx, ref, pullOpts...) ////
 	pcancel()
 	if err != nil {
 		return nil, fmt.Errorf("failed to pull and unpack image %q: %w", ref, err)
@@ -198,7 +246,7 @@ func (c *criService) PullImage(ctx context.Context, r *runtime.PullImageRequest)
 		if r == "" {
 			continue
 		}
-		if err := c.createImageReference(ctx, r, image.Target()); err != nil {
+		if err := c.createImageReference(ctx, r, image.Target(), runtimeHandler); err != nil {
 			return nil, fmt.Errorf("failed to create image reference %q: %w", r, err)
 		}
 		// Update image store to reflect the newest state in containerd.
@@ -266,10 +314,11 @@ func ParseAuth(auth *runtime.AuthConfig, host string) (string, string, error) {
 // Note that because create and update are not finished in one transaction, there could be race. E.g.
 // the image reference is deleted by someone else after create returns already exists, but before update
 // happens.
-func (c *criService) createImageReference(ctx context.Context, name string, desc imagespec.Descriptor) error {
+func (c *criService) createImageReference(ctx context.Context, name string, desc imagespec.Descriptor, runtimeHandler string) error {
 	img := containerdimages.Image{
 		Name:   name,
 		Target: desc,
+		RuntimeHandler: runtimeHandler,
 		// Add a label to indicate that the image is managed by the cri plugin.
 		Labels: map[string]string{imageLabelKey: imageLabelValue},
 	}

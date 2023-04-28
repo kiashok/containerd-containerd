@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/containerd/containerd/log"
+	specs "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
 type SandboxControllerMode string
@@ -82,6 +83,31 @@ type Runtime struct {
 	// shim - means use whatever Controller implementation provided by shim (e.g. use RemoteController).
 	// podsandbox - means use Controller implementation from sbserver podsandbox package.
 	SandboxMode string `toml:"sandbox_mode" json:"sandboxMode"`
+	// have something for platforms - os, osversion, platform, architecture etc
+	// then find the runtime for runtimehandler specified during the pull. if its there then do smth for platform matcher
+	// else just leave it as default. (see sandbox running function to see how they handle this)
+	/*
+		ociRuntime, err := c.getSandboxRuntime(config, r.GetRuntimeHandler())
+	if err != nil {
+		return nil, fmt.Errorf("unable to get OCI runtime for sandbox %q: %w", id, err)
+	}
+
+	sandboxInfo.Runtime.Name = ociRuntime.Type
+
+	// Retrieve runtime options
+	runtimeOpts, err := generateRuntimeOptions(ociRuntime, c.config)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate sandbox runtime options: %w", err)
+	}
+
+	if runtimeOpts != nil {
+		sandboxInfo.Runtime.Options, err = typeurl.MarshalAny(runtimeOpts)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal runtime options: %w", err)
+		}
+	}
+	*/
+	HostPlatform specs.Platform `toml:"host_platform" json:"hostPlatform"`
 }
 
 // ContainerdConfig contains toml config related to containerd
@@ -338,6 +364,7 @@ type PluginConfig struct {
 	//
 	// For example, the value can be '5h', '2h30m', '10s'.
 	DrainExecSyncIOTimeout string `toml:"drain_exec_sync_io_timeout" json:"drainExecSyncIOTimeout"`
+	// add smth for taking whatever is in platform (os, osversion, platform etc)
 }
 
 // X509KeyPairStreaming contains the x509 configuration for streaming

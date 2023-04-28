@@ -44,14 +44,67 @@ func (c *Client) Pull(ctx context.Context, ref string, opts ...RemoteOpt) (_ Ima
 	defer span.End()
 
 	pullCtx := defaultRemoteContext()
+//// here the options set in criservice PullImage() needs to add a function to the opts
+// that will set the platform matcher depending on the runtime handler specified during the pull. Here you need to validate
+// and then get the os, osversion and platform from the runtime options. Based on these, create a platform matcher and set
+// pullctx will be set to that.
+/*
+	m := windowsmatcher{
+		Platform:        DefaultSpec(),
+		osVersionPrefix: buildStr,
+		defaultMatcher: &matcher{
+			Platform: Normalize(DefaultSpec()),
+		},
+	}
 
+			{
+			platform: imagespec.Platform{
+				Architecture: "amd64",
+				OS:           "windows",
+			},
+			match: true,
+		},
+		{
+			platform: imagespec.Platform{
+				Architecture: "amd64",
+				OS:           "linux",
+			},
+			match: false,
+		},
+	} {
+		assert.Equal(t, test.match, m.Match(test.platform), "should match: %t, %s to %s", test.match, m.Platform, test.platform)
+	}
+	
+	example 2:
+		prefix := prefix(platform.OSVersion)
+	return windowsmatcher{
+		Platform:        platform,
+		osVersionPrefix: prefix,
+		defaultMatcher: &matcher{
+			Platform: Normalize(platform),
+		},
+	}
+
+	example 3:
+
+		prefix := prefix(platform.OSVersion)
+	return windowsmatcher{
+		Platform:        platform,
+		osVersionPrefix: prefix,
+		defaultMatcher: &matcher{
+			Platform: Normalize(platform),
+		},
+	}
+*/
 	for _, o := range opts {
-		if err := o(c, pullCtx); err != nil {
+		if err := o(c, pullCtx); err != nil { 
+
 			return nil, err
 		}
 	}
 
 	if pullCtx.PlatformMatcher == nil {
+		log.G(ctx).Debugx("pullCtx.PlatformMatcher is nil")
 		if len(pullCtx.Platforms) > 1 {
 			return nil, errors.New("cannot pull multiplatform image locally, try Fetch")
 		} else if len(pullCtx.Platforms) == 0 {

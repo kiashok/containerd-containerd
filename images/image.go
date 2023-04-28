@@ -40,6 +40,7 @@ type Image struct {
 	// This field is required.
 	Name string
 
+	RuntimeHandler string
 	// Labels provide runtime decoration for the image record.
 	//
 	// There is no default behavior for how these labels are propagated. They

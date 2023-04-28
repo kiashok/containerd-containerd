@@ -171,7 +171,7 @@ func (c *criService) RunPodSandbox(ctx context.Context, r *runtime.RunPodSandbox
 		containerd.WithSpec(spec, specOpts...),
 		containerd.WithContainerLabels(sandboxLabels),
 		containerd.WithContainerExtension(sandboxMetadataExtension, &sandbox.Metadata),
-		containerd.WithRuntime(ociRuntime.Type, runtimeOpts)}
+		containerd.WithRuntime(ociRuntime.Type, runtimeOpts)} ////// kiashok
 
 	container, err := c.client.NewContainer(ctx, id, opts...)
 	if err != nil {

@@ -142,4 +142,7 @@ require (
 
 // Fork will be merged later but may impact other go-fuzz-headers consumers:
 // https://github.com/containerd/containerd/pull/7957#pullrequestreview-1244814968
-replace github.com/AdaLogics/go-fuzz-headers => github.com/AdamKorcz/go-fuzz-headers-1 v0.0.0-20230111232327-1f10f66a31bf
+replace (
+	github.com/AdaLogics/go-fuzz-headers => github.com/AdamKorcz/go-fuzz-headers-1 v0.0.0-20230111232327-1f10f66a31bf
+	k8s.io/cri-api => ../k8s.io/kubernetes/staging/src/k8s.io/cri-api
+)

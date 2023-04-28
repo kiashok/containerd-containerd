@@ -44,9 +44,45 @@ type windowsmatcher struct {
 	defaultMatcher  Matcher
 }
 
+type windowshypervmatcher struct {
+	specs.Platform
+	osVersionPrefix string
+	defaultMatcher  Matcher
+}
+
+
+// Match matches platform with the same windows major, minor
+// and build version.
+func (m windowshypervmatcher) Match(p specs.Platform) bool {
+	log.G(context.Background()).Debugf("in windowshypervmatcher match()")
+	match := m.defaultMatcher.Match(p)
+/*
+	if match && m.OS == "windows" {
+		if strings.HasPrefix(p.OSVersion, m.osVersionPrefix) {
+			return true
+		}
+		return p.OSVersion == ""
+	}
+*/
+	return match
+}
+
+// Less sorts matched platforms in front of other platforms.
+// For matched platforms, it puts platforms with larger revision
+// number in front.
+func (m windowshypervmatcher) Less(p1, p2 specs.Platform) bool {
+	m1, m2 := m.Match(p1), m.Match(p2)
+	if m1 && m2 {
+		r1, r2 := revision(p1.OSVersion), revision(p2.OSVersion)
+		return r1 > r2
+	}
+	return m1 && !m2
+}
+
 // Match matches platform with the same windows major, minor
 // and build version.
 func (m windowsmatcher) Match(p specs.Platform) bool {
+	log.G(context.Background()).Debugf("in windowsmatcher match()")
 	match := m.defaultMatcher.Match(p)
 
 	if match && m.OS == "windows" {
