@@ -93,6 +93,9 @@ type criService struct {
 	netPlugin map[string]cni.CNI
 	// client is an instance of the containerd client
 	client *containerd.Client
+	// client per runtime class defined in containerd's config.toml
+	clientMap map[string]*containerd.Client
+
 	// streamServer is the streaming server serves container streaming request.
 	streamServer streaming.Server
 	// eventMonitor is the monitor monitors containerd events.
@@ -120,12 +123,12 @@ type criService struct {
 }
 
 // NewCRIService returns a new instance of CRIService
-func NewCRIService(config criconfig.Config, client *containerd.Client, nri *nri.API) (CRIService, error) {
+func NewCRIService(config criconfig.Config, client *containerd.Client, clientMap map[string]*containerd.Client, nri *nri.API) (CRIService, error) {
 	var err error
 	labels := label.NewStore()
 	c := &criService{
 		config:                      config,
-		client:                      client,
+		clientMap:                   clientMap,
 		os:                          osinterface.RealOS{},
 		sandboxStore:                sandboxstore.NewStore(labels),
 		containerStore:              containerstore.NewStore(labels),

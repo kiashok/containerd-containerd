@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/containerd/containerd/log"
+	specs "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
 type SandboxControllerMode string
@@ -82,6 +83,7 @@ type Runtime struct {
 	// shim - means use whatever Controller implementation provided by shim (e.g. use RemoteController).
 	// podsandbox - means use Controller implementation from sbserver podsandbox package.
 	SandboxMode string `toml:"sandbox_mode" json:"sandboxMode"`
+	HostPlatform specs.Platform `toml:"host_platform" json:"hostPlatform"`
 }
 
 // ContainerdConfig contains toml config related to containerd
