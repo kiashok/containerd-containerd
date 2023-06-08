@@ -20,6 +20,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"reflect"
 	"path/filepath"
 
 	"github.com/containerd/containerd"
@@ -77,6 +78,7 @@ func initCRIService(ic *plugin.InitContext) (interface{}, error) {
 	}
 
 	log.G(ctx).Info("Connect containerd service")
+	
 	client, err := containerd.New(
 		"",
 		containerd.WithDefaultNamespace(constants.K8sContainerdNamespace),
@@ -87,13 +89,48 @@ func initCRIService(ic *plugin.InitContext) (interface{}, error) {
 		return nil, fmt.Errorf("failed to create containerd client: %w", err)
 	}
 
+	clientMap := make(map[string]*containerd.Client)
+	for k, r := range c.PluginConfig.ContainerdConfig.Runtimes {
+		var platformMatcher platforms.MatchComparer
+		if !reflect.DeepEqual(r.HostPlatform, imagespec.Platform{}) {
+			platformMatcher = platforms.Only(r.HostPlatform)
+		} else {
+			//if reflect.DeepEqual(c.Platform, platforms.Default())
+			platformMatcher = platforms.Default()
+		}
+		clientMap[k], err = containerd.New(
+			"",
+			containerd.WithDefaultNamespace(constants.K8sContainerdNamespace),
+			containerd.WithDefaultPlatform(platformMatcher),
+			containerd.WithInMemoryServices(ic),
+			containerd.WithDefaultRuntime(k),
+		)
+
+		log.G(ctx).Debugf("failed to create containerd client: %w", err)
+//		if err != nil {
+//			return nil, fmt.Errorf("failed to create containerd client: %w", err)
+//		}
+
+		// should this be done only for windows OS runtimes?!
+		//clientMap[k] = append(clientMap[k], WithDefaultRuntime(k))
+		/*
+		if r.HostPlatform != nil {
+		   clientMap[k] = append(clientMap[k], containerd.WithDefaultPlatform(platformMatcher))
+		} else {
+			clientMap[k] = append(clientMap[k], containerd.WithDefaultPlatform(platforms.Default()))
+		}
+		*/
+		//all callers of criservice.client.func/Pull() etc needs to change to
+	//	criservice.client[runtime].func() ??
+	}
+
 	var s server.CRIService
 	if os.Getenv("ENABLE_CRI_SANDBOXES") != "" {
 		log.G(ctx).Info("using experimental CRI Sandbox server - unset ENABLE_CRI_SANDBOXES to disable")
 		s, err = sbserver.NewCRIService(c, client, getNRIAPI(ic))
 	} else {
 		log.G(ctx).Info("using legacy CRI server")
-		s, err = server.NewCRIService(c, client, getNRIAPI(ic))
+		s, err = server.NewCRIService(c, client, clientMap, getNRIAPI(ic))
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to create CRI service: %w", err)
