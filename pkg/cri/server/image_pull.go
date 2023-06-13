@@ -40,6 +40,7 @@ import (
 	"github.com/containerd/containerd"
 	"github.com/containerd/containerd/errdefs"
 	containerdimages "github.com/containerd/containerd/images"
+	runhcsoptions "github.com/Microsoft/hcsshim/cmd/containerd-shim-runhcs-v1/options"
 	"github.com/containerd/containerd/log"
 	"github.com/containerd/containerd/pkg/cri/annotations"
 	criconfig "github.com/containerd/containerd/pkg/cri/config"
@@ -94,6 +95,7 @@ import (
 // PullImage pulls an image with authentication config.
 func (c *criService) PullImage(ctx context.Context, r *runtime.PullImageRequest) (_ *runtime.PullImageResponse, err error) {
 	span := tracing.SpanFromContext(ctx)
+	log.G(ctx).Debugf("!! criService.PullImage() with pullImageReq %v", r)
 	defer func() {
 		// TODO: add domain label for imagePulls metrics, and we may need to provide a mechanism
 		// for the user to configure the set of registries that they are interested in.
@@ -117,6 +119,8 @@ func (c *criService) PullImage(ctx context.Context, r *runtime.PullImageRequest)
 	if ref != imageRef {
 		log.G(ctx).Debugf("PullImage using normalized image ref: %q", ref)
 	}
+
+	log.G(ctx).Debugf("!! criService.PullImage, imageRef %v, namedRef %v, ref %v",imageRef, namedRef, ref)
 
 	imagePullProgressTimeout, err := time.ParseDuration(c.config.ImagePullProgressTimeout)
 	if err != nil {
@@ -177,8 +181,44 @@ func (c *criService) PullImage(ctx context.Context, r *runtime.PullImageRequest)
 			containerd.WithChildLabelMap(containerdimages.ChildGCLabelsFilterLayers))
 	}
 
+	client := c.client
+	// we need to use the appropriate client using runtimeHdlr for this client.Pull() call
+
+	// get the runtimehandler and check if its process isolated or hyperV for windows for this pull image request
+	runtimeHdlr := r.GetImage().GetRuntimeHandler()
+	if runtimeHdlr == "" {
+		runtimeHdlr = c.config.ContainerdConfig.DefaultRuntimeName
+	}
+	log.G(ctx).Debugf("!! criService.PullImage, runtimeHdlr %v",runtimeHdlr)
+
+	ociRuntime, ok := c.config.ContainerdConfig.Runtimes[runtimeHdlr] // read handler.Runtimes.OSVersion etc
+	log.G(ctx).Debugf("!!! criservice.PullImage() ok %v", ok)
+	if !ok {
+		log.G(ctx).Errorf("failed to get runtime %v", runtimeHdlr)
+		return nil, fmt.Errorf("no runtime for %q is configured", runtimeHdlr)
+	}
+
+	// get runtime options for windows pods and check if its process isolated or hyperV
+	if ociRuntime.Type == runtimeRunhcsV1 {
+		runtimeOpts, err := generateRuntimeOptions(ociRuntime, c.config)
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate runtime options: %w", err)
+		}
+		rhcso, ok := runtimeOpts.(*runhcsoptions.Options)
+		if ok {
+			if rhcso.SandboxIsolation == 1 { // hyperV isolated
+				// we need to use the appropriate client using runtimeHdlr for this client.Pull() call
+				//image, err := c.clientMap[runtimeHdlr].Pull(pctx, ref, pullOpts...)
+				client = criService.clientMap[runtimeHdlr]
+				// TODO: above line check for nil
+				log.G(ctx).Debugf("!! criservice.PullImage() runtimeHdlr %v, guestPlatform %v", client.runtime, ociRuntime.GuestPlatform)
+			}
+		}
+	}
+
+//	log.G(ctx).Debugf("!!! criservice.PullImage() before generateRuntimeOptions %v", ociRuntime)
 	pullReporter.start(pctx)
-	image, err := c.client.Pull(pctx, ref, pullOpts...)
+	image, err := client.Pull(pctx, ref, pullOpts...)
 	pcancel()
 	if err != nil {
 		return nil, fmt.Errorf("failed to pull and unpack image %q: %w", ref, err)
@@ -196,7 +236,8 @@ func (c *criService) PullImage(ctx context.Context, r *runtime.PullImageRequest)
 		if r == "" {
 			continue
 		}
-		if err := c.createImageReference(ctx, r, image.Target()); err != nil {
+		// pass runtimeHdlr after r
+		if err := c.createImageReference(ctx, r,image.Target()); err != nil {
 			return nil, fmt.Errorf("failed to create image reference %q: %w", r, err)
 		}
 		// Update image store to reflect the newest state in containerd.
@@ -265,6 +306,7 @@ func ParseAuth(auth *runtime.AuthConfig, host string) (string, string, error) {
 // Note that because create and update are not finished in one transaction, there could be race. E.g.
 // the image reference is deleted by someone else after create returns already exists, but before update
 // happens.
+// after name, runtimeHdlr string
 func (c *criService) createImageReference(ctx context.Context, name string, desc imagespec.Descriptor) error {
 	img := containerdimages.Image{
 		Name:   name,
@@ -272,16 +314,18 @@ func (c *criService) createImageReference(ctx context.Context, name string, desc
 		// Add a label to indicate that the image is managed by the cri plugin.
 		Labels: map[string]string{imageLabelKey: imageLabelValue},
 	}
+	//client := c.clientMap[runtimeHdlr]
+	client := criService.client // this needs to change to above
 	// TODO(random-liu): Figure out which is the more performant sequence create then update or
 	// update then create.
-	oldImg, err := c.client.ImageService().Create(ctx, img)
+	oldImg, err := client.ImageService().Create(ctx, img)
 	if err == nil || !errdefs.IsAlreadyExists(err) {
 		return err
 	}
 	if oldImg.Target.Digest == img.Target.Digest && oldImg.Labels[imageLabelKey] == imageLabelValue {
 		return nil
 	}
-	_, err = c.client.ImageService().Update(ctx, img, "target", "labels."+imageLabelKey)
+	_, err = client.ImageService().Update(ctx, img, "target", "labels."+imageLabelKey)
 	return err
 }
 

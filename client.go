@@ -26,6 +26,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"reflect"
 
 	containersapi "github.com/containerd/containerd/api/services/containers/v1"
 	contentapi "github.com/containerd/containerd/api/services/content/v1"
@@ -108,6 +109,12 @@ func New(address string, opts ...ClientOpt) (*Client, error) {
 		c.platform = copts.defaultPlatform
 	} else {
 		c.platform = platforms.Default()
+	}
+
+	// copts.guestPlatform is set only while creating clientMap. See cri.go
+	//if copts.guestPlatform != ocispec.Platform{} {
+	if !reflect.DeepEqual(copts.guestPlatform, ocispec.Platform{}) {
+		c.platform = platforms.Only(copts.guestPlatform)	
 	}
 
 	if copts.services != nil {

@@ -31,6 +31,7 @@ import (
 type clientOpts struct {
 	defaultns       string
 	defaultRuntime  string
+	guestPlatform   ocispec.Platform
 	defaultPlatform platforms.MatchComparer
 	services        *services
 	dialOptions     []grpc.DialOption
@@ -59,6 +60,13 @@ func WithDefaultRuntime(rt string) ClientOpt {
 		return nil
 	}
 }
+
+func WithGuestPlatform(guestPlatform ocispec.Platform) ClientOpt {
+	return func(c *clientOpts) error {
+		c.guestPlatform = guestPlatform
+		return nil
+	}
+} 
 
 // WithDefaultPlatform sets the default platform matcher on the client
 func WithDefaultPlatform(platform platforms.MatchComparer) ClientOpt {

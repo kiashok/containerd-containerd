@@ -17,11 +17,14 @@
 package platforms
 
 import (
+	"context"
 	"fmt"
 	"runtime"
 	"strconv"
 	"strings"
 
+	"github.com/containerd/containerd/log"
+	"github.com/Microsoft/hcsshim/osversion"
 	specs "github.com/opencontainers/image-spec/specs-go/v1"
 	"golang.org/x/sys/windows"
 )
@@ -50,6 +53,23 @@ func (m windowsmatcher) Match(p specs.Platform) bool {
 	match := m.defaultMatcher.Match(p)
 
 	if match && m.OS == "windows" {
+		hostMajorMinorVersion := majorMinor(m.osVersionPrefix)
+		hostOsBuildNum := buildNumber(m.osVersionPrefix)
+		ctrMajorMinorVersion := majorMinor(p.OSVersion)
+		ctrOsBuildNum := buildNumber(p.OSVersion)
+		
+		if hostMajorMinorVersion != ctrMajorMinorVersion {
+			return false
+		}
+
+		// TODO: Add the matrix for supporting previous ltsc version if host is annual release
+		// if host is ltsc then supports only itself and not older ones?
+		if hostOsBuildNum >= osversion.V21H2Server || hostOsBuildNum == osversion.V21H2Win11 {
+			log.G(context.Background()).Debugf("!! in windowsmatcher match(), >= WS2022/Win11")
+			return (ctrOsBuildNum >= osversion.V21H2Server)
+		}
+
+		// orig
 		if strings.HasPrefix(p.OSVersion, m.osVersionPrefix) {
 			return true
 		}
@@ -69,6 +89,27 @@ func (m windowsmatcher) Less(p1, p2 specs.Platform) bool {
 		return r1 > r2
 	}
 	return m1 && !m2
+}
+
+func majorMinor(v string) string {
+	parts := strings.Split(v, ".")
+	if len(parts) < 2 {
+		return ""
+	}
+	return strings.Join(parts[0:2], ".")
+}
+
+func buildNumber(v string) int {
+	parts := strings.Split(v, ".")
+	if len(parts) < 3 {
+		return 0
+	}	
+	
+	r, err := strconv.Atoi(parts[2])
+	if err != nil {
+		return 0
+	}
+	return r
 }
 
 func revision(v string) int {
