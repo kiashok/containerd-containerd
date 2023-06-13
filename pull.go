@@ -23,6 +23,7 @@ import (
 
 	"github.com/containerd/containerd/errdefs"
 	"github.com/containerd/containerd/images"
+	"github.com/containerd/containerd/log"
 	"github.com/containerd/containerd/pkg/unpack"
 	"github.com/containerd/containerd/platforms"
 	"github.com/containerd/containerd/remotes"
@@ -51,12 +52,16 @@ func (c *Client) Pull(ctx context.Context, ref string, opts ...RemoteOpt) (_ Ima
 		}
 	}
 
+	log.G(ctx).Debugf("!! client.Pull() pullCtx.Platforms %v", pullCtx.PlatformMatcher)
 	if pullCtx.PlatformMatcher == nil {
 		if len(pullCtx.Platforms) > 1 {
+			log.G(ctx).Debugf("!! client.Pull() len(pullCtx.Platforms) > 1")
 			return nil, errors.New("cannot pull multiplatform image locally, try Fetch")
 		} else if len(pullCtx.Platforms) == 0 {
+			log.G(ctx).Debugf("!! client.Pull() len(pullCtx.Platforms) == 0")
 			pullCtx.PlatformMatcher = c.platform
 		} else {
+			log.G(ctx).Debugf("!! client.Pull() else for pullCtx.PlatformMatcher == nil")
 			p, err := platforms.Parse(pullCtx.Platforms[0])
 			if err != nil {
 				return nil, fmt.Errorf("invalid platform %s: %w", pullCtx.Platforms[0], err)

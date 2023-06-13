@@ -38,6 +38,8 @@ import (
 type Image struct {
 	// Id of the image. Normally the digest of image config.
 	ID string
+	// runtime handler used to pull this image
+//	RuntimeHandler string
 	// References are references to the image, e.g. RepoTag and RepoDigest.
 	References []string
 	// ChainID is the chainID of the image.

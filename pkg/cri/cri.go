@@ -91,17 +91,20 @@ func initCRIService(ic *plugin.InitContext) (interface{}, error) {
 
 	clientMap := make(map[string]*containerd.Client)
 	for k, r := range c.PluginConfig.ContainerdConfig.Runtimes {
-		var platformMatcher platforms.MatchComparer
-		if !reflect.DeepEqual(r.HostPlatform, imagespec.Platform{}) {
-			platformMatcher = platforms.Only(r.HostPlatform)
-		} else {
-			//if reflect.DeepEqual(c.Platform, platforms.Default())
-			platformMatcher = platforms.Default()
-		}
+		var guestPlatform imagespec.Platform
+		
+		if !reflect.DeepEqual(r.GuestPlatform, imagespec.Platform{}) {
+			guestPlatform = r.GuestPlatform
+		} 
+		//else {
+		//	guestPlatform = platforms.DefaultSpec()
+		//}
+		
 		clientMap[k], err = containerd.New(
 			"",
 			containerd.WithDefaultNamespace(constants.K8sContainerdNamespace),
-			containerd.WithDefaultPlatform(platformMatcher),
+			containerd.WithGuestPlatform(guestPlatform),
+			//containerd.WithDefaultPlatform(platforms.Default()),
 			containerd.WithInMemoryServices(ic),
 			containerd.WithDefaultRuntime(k),
 		)

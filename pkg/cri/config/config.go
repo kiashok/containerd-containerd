@@ -83,7 +83,7 @@ type Runtime struct {
 	// shim - means use whatever Controller implementation provided by shim (e.g. use RemoteController).
 	// podsandbox - means use Controller implementation from sbserver podsandbox package.
 	SandboxMode string `toml:"sandbox_mode" json:"sandboxMode"`
-	HostPlatform specs.Platform `toml:"host_platform" json:"hostPlatform"`
+	GuestPlatform specs.Platform `toml:"guest_platform" json:"guestPlatform"`
 }
 
 // ContainerdConfig contains toml config related to containerd
