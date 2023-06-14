@@ -128,6 +128,7 @@ func (l *local) Create(ctx context.Context, req *imagesapi.CreateImageRequest, _
 	if err := l.publisher.Publish(ctx, "/images/create", &eventstypes.ImageCreate{
 		Name:   resp.Image.Name,
 		Labels: resp.Image.Labels,
+		//RuntimeHanlder: resp.Image.RuntimeHandler,
 	}); err != nil {
 		return nil, err
 	}

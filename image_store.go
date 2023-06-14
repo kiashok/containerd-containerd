@@ -70,6 +70,7 @@ func (s *remoteImages) Create(ctx context.Context, image images.Image) (images.I
 	req := &imagesapi.CreateImageRequest{
 		Image: imageToProto(&image),
 	}
+	log.G(ctx).Debugf("!! remoteImages.Create(), req: %v", req)
 	if tm := epoch.FromContext(ctx); tm != nil {
 		req.SourceDateEpoch = timestamppb.New(*tm)
 	}
@@ -125,6 +126,7 @@ func imageToProto(image *images.Image) *imagesapi.Image {
 		Target:    descToProto(&image.Target),
 		CreatedAt: protobuf.ToTimestamp(image.CreatedAt),
 		UpdatedAt: protobuf.ToTimestamp(image.UpdatedAt),
+		RuntimeHandler: image.RuntimeHandler,
 	}
 }
 
