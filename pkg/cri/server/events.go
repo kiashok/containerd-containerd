@@ -351,13 +351,14 @@ func (em *eventMonitor) handleEvent(any interface{}) error {
 		}
 	case *eventtypes.ImageCreate:
 		logrus.Infof("ImageCreate event %+v", e)
-		return em.c.updateImage(ctx, e.Name)
+		return em.c.updateImage(ctx, e.Name, e.RuntimeHandler)
+		// TODO: the following two if cases also need to be changed to include the RuntimeHandler
 	case *eventtypes.ImageUpdate:
 		logrus.Infof("ImageUpdate event %+v", e)
-		return em.c.updateImage(ctx, e.Name)
+		return em.c.updateImage(ctx, e.Name, e.RuntimeHandler)
 	case *eventtypes.ImageDelete:
 		logrus.Infof("ImageDelete event %+v", e)
-		return em.c.updateImage(ctx, e.Name)
+		return em.c.updateImage(ctx, e.Name, e.RuntimeHandler)
 	}
 
 	return nil

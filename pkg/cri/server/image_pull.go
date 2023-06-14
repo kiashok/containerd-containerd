@@ -186,6 +186,7 @@ func (c *criService) PullImage(ctx context.Context, r *runtime.PullImageRequest)
 	}
 
 	client := c.client
+	log.G(ctx).Debugf("!! criService.PullImage, before calling pull, client %v",client)
 	// we need to use the appropriate client using runtimeHdlr for this client.Pull() call
 
 	// get the runtimehandler and check if its process isolated or hyperV for windows for this pull image request
@@ -216,11 +217,12 @@ func (c *criService) PullImage(ctx context.Context, r *runtime.PullImageRequest)
 				client = c.clientMap[runtimeHdlr]
 				// TODO: above line check for nil
 				// why not c.runtime below?
-				log.G(ctx).Debugf("!! criservice.PullImage() runtimeHdlr %v, guestPlatform %v", client.Runtime, ociRuntime.GuestPlatform)
+				log.G(ctx).Debugf("!! criservice.PullImage() client %v, guestPlatform %v", client, ociRuntime.GuestPlatform)
 			}
 		}
 	}
 
+	log.G(ctx).Debugf("!! criService.PullImage, before calling pull2, client %v",client)
 //	log.G(ctx).Debugf("!!! criservice.PullImage() before generateRuntimeOptions %v", ociRuntime)
 	pullReporter.start(pctx)
 	image, err := client.Pull(pctx, ref, pullOpts...)
@@ -237,6 +239,7 @@ func (c *criService) PullImage(ctx context.Context, r *runtime.PullImageRequest)
 	imageID := configDesc.Digest.String()
 
 	repoDigest, repoTag := getRepoDigestAndTag(namedRef, image.Target().Digest, isSchema1)
+	log.G(ctx).Debugf("!! criservice.PullImage() before for imageID %v, repoTag %v, repoDigest %v", imageID, repoTag, repoDigest)
 	for _, r := range []string{imageID, repoTag, repoDigest} {
 		if r == "" {
 			continue
@@ -248,7 +251,8 @@ func (c *criService) PullImage(ctx context.Context, r *runtime.PullImageRequest)
 		// Update image store to reflect the newest state in containerd.
 		// No need to use `updateImage`, because the image reference must
 		// have been managed by the cri plugin.
-		if err := c.imageStore.Update(ctx, r); err != nil {
+		log.G(ctx).Debugf("!! criservice.PullImage() before called c.imageStore.Update()")
+		if err := c.imageStore.Update(ctx, r, runtimeHdlr); err != nil {
 			return nil, fmt.Errorf("failed to update image store %q: %w", r, err)
 		}
 	}
@@ -355,8 +359,9 @@ func (c *criService) getLabels(ctx context.Context, name string) map[string]stri
 // updateImage updates image store to reflect the newest state of an image reference
 // in containerd. If the reference is not managed by the cri plugin, the function also
 // generates necessary metadata for the image and make it managed.
-func (c *criService) updateImage(ctx context.Context, r string) error {
-	img, err := c.client.GetImage(ctx, r)
+func (c *criService) updateImage(ctx context.Context, r string, runtimeHandler string) error {
+	//img, err := c.client.GetImage(ctx, r)
+	img, err := c.clientMap[runtimeHandler].GetImage(ctx, r)
 	if err != nil && !errdefs.IsNotFound(err) {
 		return fmt.Errorf("get image by reference: %w", err)
 	}
@@ -372,7 +377,7 @@ func (c *criService) updateImage(ctx context.Context, r string) error {
 		if err := c.createImageReference(ctx, id, img.Target(), labels); err != nil {
 			return fmt.Errorf("create image id reference %q: %w", id, err)
 		}
-		if err := c.imageStore.Update(ctx, id); err != nil {
+		if err := c.imageStore.Update(ctx, id, runtimeHandler); err != nil {
 			return fmt.Errorf("update image store for %q: %w", id, err)
 		}
 		// The image id is ready, add the label to mark the image as managed.

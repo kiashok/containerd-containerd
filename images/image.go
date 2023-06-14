@@ -40,9 +40,6 @@ type Image struct {
 	// This field is required.
 	Name string
 
-	// Runtime handler used to pull this image
-	RuntimeHandler string
-
 	// Labels provide runtime decoration for the image record.
 	//
 	// There is no default behavior for how these labels are propagated. They
@@ -61,6 +58,7 @@ type Image struct {
 // DeleteOptions provide options on image delete
 type DeleteOptions struct {
 	Synchronous bool
+	RuntimeHandler bool
 }
 
 // DeleteOpt allows configuring a delete operation

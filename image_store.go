@@ -65,10 +65,10 @@ func (s *remoteImages) List(ctx context.Context, filters ...string) ([]images.Im
 	return imagesFromProto(resp.Images), nil
 }
 
-func (s *remoteImages) Create(ctx context.Context, image images.Image) (images.Image, error) {
+func (s *remoteImages) Create(ctx context.Context, image images.Image, runtimeHandler string) (images.Image, error) {
 	log.G(ctx).Debugf("!! remoteImages.Create(), image: %v", image)
 	req := &imagesapi.CreateImageRequest{
-		Image: imageToProto(&image),
+		Image: imageToProto(&image, runtimeHandler),
 	}
 	log.G(ctx).Debugf("!! remoteImages.Create(), req: %v", req)
 	if tm := epoch.FromContext(ctx); tm != nil {
@@ -82,7 +82,7 @@ func (s *remoteImages) Create(ctx context.Context, image images.Image) (images.I
 	return imageFromProto(created.Image), nil
 }
 
-func (s *remoteImages) Update(ctx context.Context, image images.Image, fieldpaths ...string) (images.Image, error) {
+func (s *remoteImages) Update(ctx context.Context, image images.Image, runtimeHandler string, fieldpaths ...string) (images.Image, error) {
 	var updateMask *ptypes.FieldMask
 	if len(fieldpaths) > 0 {
 		updateMask = &ptypes.FieldMask{
@@ -90,7 +90,7 @@ func (s *remoteImages) Update(ctx context.Context, image images.Image, fieldpath
 		}
 	}
 	req := &imagesapi.UpdateImageRequest{
-		Image:      imageToProto(&image),
+		Image:      imageToProto(&image, runtimeHandler),
 		UpdateMask: updateMask,
 	}
 	if tm := epoch.FromContext(ctx); tm != nil {
@@ -119,14 +119,14 @@ func (s *remoteImages) Delete(ctx context.Context, name string, opts ...images.D
 	return errdefs.FromGRPC(err)
 }
 
-func imageToProto(image *images.Image) *imagesapi.Image {
+func imageToProto(image *images.Image, runtimeHandler string) *imagesapi.Image {
 	return &imagesapi.Image{
 		Name:      image.Name,
 		Labels:    image.Labels,
 		Target:    descToProto(&image.Target),
 		CreatedAt: protobuf.ToTimestamp(image.CreatedAt),
 		UpdatedAt: protobuf.ToTimestamp(image.UpdatedAt),
-		RuntimeHandler: image.RuntimeHandler,
+		RuntimeHandler: runtimeHandler,
 	}
 }
 
@@ -137,6 +137,7 @@ func imageFromProto(imagepb *imagesapi.Image) images.Image {
 		Target:    descFromProto(imagepb.Target),
 		CreatedAt: protobuf.FromTimestamp(imagepb.CreatedAt),
 		UpdatedAt: protobuf.FromTimestamp(imagepb.UpdatedAt),
+		RuntimeHandler: imahepb.RuntimeHandler,
 	}
 }
 

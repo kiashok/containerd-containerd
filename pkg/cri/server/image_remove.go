@@ -45,6 +45,10 @@ func (c *criService) RemoveImage(ctx context.Context, r *runtime.RemoveImageRequ
 		return nil, fmt.Errorf("can not resolve %q locally: %w", r.GetImage().GetImage(), err)
 	}
 	span.SetAttributes(tracing.Attribute("image.id", image.ID))
+
+	// get runtime handler of this image if specified. Else take the default
+	//runtimeHandler, err := c.localRe
+
 	// Remove all image references.
 	for i, ref := range image.References {
 		var opts []images.DeleteOpt

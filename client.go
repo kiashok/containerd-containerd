@@ -105,6 +105,12 @@ func New(address string, opts ...ClientOpt) (*Client, error) {
 		c.runtime = defaults.DefaultRuntime
 	}
 
+	if copts.runtimeHandler != "" {
+		c.runtimeHandler = copts.runtimeHandler
+	} else {
+		c.runtimeHandler = ""
+	}
+
 	if copts.defaultPlatform != nil {
 		c.platform = copts.defaultPlatform
 	} else {
@@ -114,6 +120,7 @@ func New(address string, opts ...ClientOpt) (*Client, error) {
 	// copts.guestPlatform is set only while creating clientMap. See cri.go
 	//if copts.guestPlatform != ocispec.Platform{} {
 	if !reflect.DeepEqual(copts.guestPlatform, ocispec.Platform{}) {
+		log.G(context.Background()).Debugf("!! ctrd.New() client.runtime %v", c.runtime)
 		c.platform = platforms.Only(copts.guestPlatform)	
 	}
 

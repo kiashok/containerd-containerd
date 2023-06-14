@@ -33,6 +33,7 @@ type clientOpts struct {
 	defaultRuntime  string
 	guestPlatform   ocispec.Platform
 	defaultPlatform platforms.MatchComparer
+	runtimeHandler string
 	services        *services
 	dialOptions     []grpc.DialOption
 	callOptions     []grpc.CallOption
@@ -49,6 +50,13 @@ type ClientOpt func(c *clientOpts) error
 func WithDefaultNamespace(ns string) ClientOpt {
 	return func(c *clientOpts) error {
 		c.defaultns = ns
+		return nil
+	}
+}
+
+func WithRuntimeHandler(runtimeHandler string) ClientOpt{
+	return func(c *clientOpts) error {
+		c.runtimeHandler = runtimeHandler
 		return nil
 	}
 }

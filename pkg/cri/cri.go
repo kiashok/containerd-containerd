@@ -83,6 +83,7 @@ func initCRIService(ic *plugin.InitContext) (interface{}, error) {
 		"",
 		containerd.WithDefaultNamespace(constants.K8sContainerdNamespace),
 		containerd.WithDefaultPlatform(platforms.Default()),
+		containerd.WithRuntimeHandler(c.PluginConfig.ContainerdConfig.DefaultRuntimeName),
 		containerd.WithInMemoryServices(ic),
 	)
 	if err != nil {
@@ -92,9 +93,12 @@ func initCRIService(ic *plugin.InitContext) (interface{}, error) {
 	clientMap := make(map[string]*containerd.Client)
 	for k, r := range c.PluginConfig.ContainerdConfig.Runtimes {
 		var guestPlatform imagespec.Platform
-		
+		log.G(context.Background()).Debugf("!! InitCriService k: %v", k)
+		log.G(context.Background()).Debugf("!! InitCriService r.GuestPlatform: %v", r.GuestPlatform)
+	
 		if !reflect.DeepEqual(r.GuestPlatform, imagespec.Platform{}) {
 			guestPlatform = r.GuestPlatform
+			ic.Meta.Platforms = []imagespec.Platform{platforms.Only(guestPlatform)}
 		} 
 		//else {
 		//	guestPlatform = platforms.DefaultSpec()
@@ -106,10 +110,12 @@ func initCRIService(ic *plugin.InitContext) (interface{}, error) {
 			containerd.WithGuestPlatform(guestPlatform),
 			//containerd.WithDefaultPlatform(platforms.Default()),
 			containerd.WithInMemoryServices(ic),
-			containerd.WithDefaultRuntime(k),
+			containerd.WithRuntimeHandler(k),
 		)
 
-		log.G(ctx).Debugf("failed to create containerd client: %w", err)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create containerd clientMap: %w", err)
+		}
 //		if err != nil {
 //			return nil, fmt.Errorf("failed to create containerd client: %w", err)
 //		}

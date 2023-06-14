@@ -33,13 +33,16 @@ import (
 	imagespec "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
+// imageName-RuntimeHandler. Example: nanoserver:ltsc2022-RuntimeHandler
+
+const imageKeyFormat = "%s-%s"
 // Image contains all resources associated with the image. All fields
 // MUST not be mutated directly after created.
 type Image struct {
 	// Id of the image. Normally the digest of image config.
 	ID string
 	// runtime handler used to pull this image
-//	RuntimeHandler string
+	//RuntimeHandler string
 	// References are references to the image, e.g. RepoTag and RepoDigest.
 	References []string
 	// ChainID is the chainID of the image.
@@ -76,7 +79,7 @@ func NewStore(client *containerd.Client) *Store {
 }
 
 // Update updates cache for a reference.
-func (s *Store) Update(ctx context.Context, ref string) error {
+func (s *Store) Update(ctx context.Context, ref string, runtimeHandler string) error {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	i, err := s.client.GetImage(ctx, ref)
@@ -85,7 +88,7 @@ func (s *Store) Update(ctx context.Context, ref string) error {
 	}
 	var img *Image
 	if err == nil {
-		img, err = getImage(ctx, i)
+		img, err = getImage(ctx, i, runtimeHandler)
 		if err != nil {
 			return fmt.Errorf("get image info from containerd: %w", err)
 		}
@@ -119,7 +122,7 @@ func (s *Store) update(ref string, img *Image) error {
 }
 
 // getImage gets image information from containerd.
-func getImage(ctx context.Context, i containerd.Image) (*Image, error) {
+func getImage(ctx context.Context, i containerd.Image, runtimeHandler string) (*Image, error) {
 	// Get image information.
 	diffIDs, err := i.RootFS(ctx)
 	if err != nil {
@@ -147,6 +150,7 @@ func getImage(ctx context.Context, i containerd.Image) (*Image, error) {
 
 	return &Image{
 		ID:         id,
+		RuntimeHandler: runtimeHandler,
 		References: []string{i.Name()},
 		ChainID:    chainID.String(),
 		Size:       size,
@@ -207,6 +211,7 @@ func (s *store) add(img Image) error {
 		}
 	}
 
+//	imageKey := fmt.Sprintf(imageKeyFormat, img.ID, img.RuntimeHandler)
 	i, ok := s.images[img.ID]
 	if !ok {
 		// If the image doesn't exist, add it.
