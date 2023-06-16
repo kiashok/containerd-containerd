@@ -24,8 +24,10 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"runtime"
 
 	"github.com/containerd/containerd/content"
+	"github.com/containerd/containerd/log"
 	"github.com/containerd/containerd/diff"
 	"github.com/containerd/containerd/errdefs"
 	"github.com/containerd/containerd/images"
@@ -117,6 +119,9 @@ var _ = (Image)(&image{})
 
 // NewImage returns a client image object from the metadata image
 func NewImage(client *Client, i images.Image) Image {
+	//log.G(ctx).Debugf(" !!client.NewImage() platformMatcher %v", client.PlatformMatcher)
+	log.G(context.Background()).Debugf(" !!client.NewImage() client %v", client)
+	log.G(context.Background()).Debugf(" !!client.NewImage() ctrd.Image %v", i)
 	return &image{
 		client:   client,
 		i:        i,
@@ -160,8 +165,16 @@ func (i *image) Labels() map[string]string {
 }
 
 func (i *image) RootFS(ctx context.Context) ([]digest.Digest, error) {
+	
 	i.mu.Lock()
 	defer i.mu.Unlock()
+	_, file, no, ok := runtime.Caller(1)
+	if ok {
+		fmt.Printf("called from %s#%d\n", file, no)
+		log.G(ctx).Debugf("!! RootFS() file: %v no %v", file, no)
+	}
+	log.G(ctx).Debugf("!! RootFS() image i %v", i)
+
 	if i.diffIDs != nil {
 		return i.diffIDs, nil
 	}
@@ -271,6 +284,8 @@ func (i *image) Usage(ctx context.Context, opts ...UsageOpt) (int64, error) {
 
 func (i *image) Config(ctx context.Context) (ocispec.Descriptor, error) {
 	provider := i.client.ContentStore()
+	//
+	log.G(ctx).Debugf("!! image.Config, i.platform %v", i.platform)
 	return i.i.Config(ctx, provider, i.platform)
 }
 

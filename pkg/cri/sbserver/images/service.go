@@ -53,7 +53,8 @@ func NewService(config criconfig.Config, imageFSPath string, client *containerd.
 	svc := CRIImageService{
 		config:                      config,
 		client:                      client,
-		imageStore:                  imagestore.NewStore(client),
+		imageStore:                  imagestore.NewStore(client, nil),  ////////// TODO: all of sbserver code should be updated correctly.
+		//placing nil value for clientMap to temprarily unblock normal case testing!!
 		imageFSPath:                 imageFSPath,
 		snapshotStore:               snapshotstore.NewStore(),
 		unpackDuplicationSuppressor: kmutex.New(),

@@ -20,8 +20,10 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"runtime"
 
 	"github.com/containerd/containerd"
+	"github.com/containerd/containerd/log"
 	"github.com/containerd/containerd/errdefs"
 	"github.com/containerd/containerd/pkg/cri/labels"
 	"github.com/containerd/containerd/pkg/cri/util"
@@ -42,7 +44,7 @@ type Image struct {
 	// Id of the image. Normally the digest of image config.
 	ID string
 	// runtime handler used to pull this image
-	//RuntimeHandler string
+	RuntimeHandler string
 	// References are references to the image, e.g. RepoTag and RepoDigest.
 	References []string
 	// ChainID is the chainID of the image.
@@ -62,15 +64,17 @@ type Store struct {
 	refCache map[string]string
 	// client is the containerd client.
 	client *containerd.Client
+	clientMap map[string]*containerd.Client
 	// store is the internal image store indexed by image id.
 	store *store
 }
 
 // NewStore creates an image store.
-func NewStore(client *containerd.Client) *Store {
+func NewStore(client *containerd.Client, clientMap map[string]*containerd.Client) *Store {
 	return &Store{
 		refCache: make(map[string]string),
 		client:   client,
+		clientMap: clientMap,
 		store: &store{
 			images:    make(map[string]Image),
 			digestSet: digestset.NewSet(),
@@ -82,10 +86,23 @@ func NewStore(client *containerd.Client) *Store {
 func (s *Store) Update(ctx context.Context, ref string, runtimeHandler string) error {
 	s.lock.Lock()
 	defer s.lock.Unlock()
-	i, err := s.client.GetImage(ctx, ref)
+	_, file, no, ok := runtime.Caller(1)
+	if ok {
+		fmt.Printf("called from %s#%d\n", file, no)
+		log.G(ctx).Debugf("!! cri/store Update() file: %v no %v", file, no)
+	}
+
+	client := s.clientMap[runtimeHandler]
+	i, err := client.GetImage(ctx, ref)
 	if err != nil && !errdefs.IsNotFound(err) {
 		return fmt.Errorf("get image from containerd: %w", err)
 	}
+
+	log.G(ctx).Debugf("!! cri/store Update, client %v, ctrd.image %v", client, i)
+	log.G(ctx).Debugf("!! cri/store image Update, ref %v, runtimeHandler %v", ref, runtimeHandler)
+	
+	//???i.RuntimeHandler = client.RuntimeHandler
+
 	var img *Image
 	if err == nil {
 		img, err = getImage(ctx, i, runtimeHandler)

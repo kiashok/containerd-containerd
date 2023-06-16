@@ -43,7 +43,6 @@ func imageToProto(image *images.Image) *imagesapi.Image {
 		Target:    descToProto(&image.Target),
 		CreatedAt: protobuf.ToTimestamp(image.CreatedAt),
 		UpdatedAt: protobuf.ToTimestamp(image.UpdatedAt),
-		RuntimeHandler: image.RuntimeHandler,
 	}
 }
 
@@ -54,7 +53,6 @@ func imageFromProto(imagepb *imagesapi.Image) images.Image {
 		Target:    descFromProto(imagepb.Target),
 		CreatedAt: protobuf.FromTimestamp(imagepb.CreatedAt),
 		UpdatedAt: protobuf.FromTimestamp(imagepb.UpdatedAt),
-		RuntimeHandler: imagepb.RuntimeHandler,
 	}
 }
 

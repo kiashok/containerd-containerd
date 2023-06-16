@@ -44,8 +44,9 @@ func NewImageStoreFromClient(client imagesapi.ImagesClient) images.Store {
 }
 
 func (s *remoteImages) Get(ctx context.Context, name string) (images.Image, error) {
-	resp, err := s.client.Get(ctx, &imagesapi.GetImageRequest{
+	resp, err := s.client.Get(ctx, &imagesapi.GetImageRequest{ // should we have runtimeHandler here?
 		Name: name,
+		// runtime handler??
 	})
 	if err != nil {
 		return images.Image{}, errdefs.FromGRPC(err)
@@ -65,11 +66,14 @@ func (s *remoteImages) List(ctx context.Context, filters ...string) ([]images.Im
 	return imagesFromProto(resp.Images), nil
 }
 
-func (s *remoteImages) Create(ctx context.Context, image images.Image, runtimeHandler string) (images.Image, error) {
+func (s *remoteImages) Create(ctx context.Context, image images.Image) (images.Image, error) {
 	log.G(ctx).Debugf("!! remoteImages.Create(), image: %v", image)
 	req := &imagesapi.CreateImageRequest{
-		Image: imageToProto(&image, runtimeHandler),
+		Image: imageToProto(&image),
+//		RuntimeHandler: runtimeHandler,
 	}
+//req.Image.RuntimeHandler = runtimeHandler
+
 	log.G(ctx).Debugf("!! remoteImages.Create(), req: %v", req)
 	if tm := epoch.FromContext(ctx); tm != nil {
 		req.SourceDateEpoch = timestamppb.New(*tm)
@@ -82,7 +86,7 @@ func (s *remoteImages) Create(ctx context.Context, image images.Image, runtimeHa
 	return imageFromProto(created.Image), nil
 }
 
-func (s *remoteImages) Update(ctx context.Context, image images.Image, runtimeHandler string, fieldpaths ...string) (images.Image, error) {
+func (s *remoteImages) Update(ctx context.Context, image images.Image, fieldpaths ...string) (images.Image, error) {
 	var updateMask *ptypes.FieldMask
 	if len(fieldpaths) > 0 {
 		updateMask = &ptypes.FieldMask{
@@ -90,9 +94,12 @@ func (s *remoteImages) Update(ctx context.Context, image images.Image, runtimeHa
 		}
 	}
 	req := &imagesapi.UpdateImageRequest{
-		Image:      imageToProto(&image, runtimeHandler),
+		Image:      imageToProto(&image),
 		UpdateMask: updateMask,
+	//	RuntimeHandler: runtimeHandler,
 	}
+//	req.Image.RuntimeHandler = runtimeHandler
+
 	if tm := epoch.FromContext(ctx); tm != nil {
 		req.SourceDateEpoch = timestamppb.New(*tm)
 	}
@@ -119,14 +126,14 @@ func (s *remoteImages) Delete(ctx context.Context, name string, opts ...images.D
 	return errdefs.FromGRPC(err)
 }
 
-func imageToProto(image *images.Image, runtimeHandler string) *imagesapi.Image {
+func imageToProto(image *images.Image) *imagesapi.Image {
 	return &imagesapi.Image{
 		Name:      image.Name,
 		Labels:    image.Labels,
 		Target:    descToProto(&image.Target),
 		CreatedAt: protobuf.ToTimestamp(image.CreatedAt),
 		UpdatedAt: protobuf.ToTimestamp(image.UpdatedAt),
-		RuntimeHandler: runtimeHandler,
+		RuntimeHandler: image.RuntimeHandler,
 	}
 }
 
@@ -137,7 +144,7 @@ func imageFromProto(imagepb *imagesapi.Image) images.Image {
 		Target:    descFromProto(imagepb.Target),
 		CreatedAt: protobuf.FromTimestamp(imagepb.CreatedAt),
 		UpdatedAt: protobuf.FromTimestamp(imagepb.UpdatedAt),
-		RuntimeHandler: imahepb.RuntimeHandler,
+		RuntimeHandler: imagepb.RuntimeHandler,
 	}
 }
 

@@ -208,7 +208,7 @@ func (c *CRIImageService) PullImage(ctx context.Context, r *runtime.PullImageReq
 		// Update image store to reflect the newest state in containerd.
 		// No need to use `updateImage`, because the image reference must
 		// have been managed by the cri plugin.
-		if err := c.imageStore.Update(ctx, r); err != nil {
+		if err := c.imageStore.Update(ctx, r, ""); err != nil {
 			return nil, fmt.Errorf("failed to update image store %q: %w", r, err)
 		}
 	}
@@ -344,7 +344,7 @@ func (c *CRIImageService) UpdateImage(ctx context.Context, r string) error {
 		if err := c.createImageReference(ctx, id, img.Target(), labels); err != nil {
 			return fmt.Errorf("create image id reference %q: %w", id, err)
 		}
-		if err := c.imageStore.Update(ctx, id); err != nil {
+		if err := c.imageStore.Update(ctx, id, ""); err != nil {
 			return fmt.Errorf("update image store for %q: %w", id, err)
 		}
 		// The image id is ready, add the label to mark the image as managed.
@@ -354,7 +354,7 @@ func (c *CRIImageService) UpdateImage(ctx context.Context, r string) error {
 	}
 	// If the image is not found, we should continue updating the cache,
 	// so that the image can be removed from the cache.
-	if err := c.imageStore.Update(ctx, r); err != nil {
+	if err := c.imageStore.Update(ctx, r, ""); err != nil {
 		return fmt.Errorf("update image store for %q: %w", r, err)
 	}
 	return nil

@@ -22,6 +22,7 @@ import (
 	"os"
 	"reflect"
 	"path/filepath"
+	"context"
 
 	"github.com/containerd/containerd"
 	"github.com/containerd/containerd/log"
@@ -83,7 +84,9 @@ func initCRIService(ic *plugin.InitContext) (interface{}, error) {
 		"",
 		containerd.WithDefaultNamespace(constants.K8sContainerdNamespace),
 		containerd.WithDefaultPlatform(platforms.Default()),
-		containerd.WithRuntimeHandler(c.PluginConfig.ContainerdConfig.DefaultRuntimeName),
+	//	containerd.WithRuntimeHandler(c.PluginConfig.ContainerdConfig.DefaultRuntimeName),
+	// NOTE: purposely not setting runtime handler here as it is the default client created. We need to use
+	// client in the map for image pull purposes
 		containerd.WithInMemoryServices(ic),
 	)
 	if err != nil {
@@ -98,7 +101,7 @@ func initCRIService(ic *plugin.InitContext) (interface{}, error) {
 	
 		if !reflect.DeepEqual(r.GuestPlatform, imagespec.Platform{}) {
 			guestPlatform = r.GuestPlatform
-			ic.Meta.Platforms = []imagespec.Platform{platforms.Only(guestPlatform)}
+			ic.Meta.Platforms = []imagespec.Platform{guestPlatform}
 		} 
 		//else {
 		//	guestPlatform = platforms.DefaultSpec()
@@ -138,7 +141,7 @@ func initCRIService(ic *plugin.InitContext) (interface{}, error) {
 		log.G(ctx).Info("using experimental CRI Sandbox server - unset ENABLE_CRI_SANDBOXES to disable")
 		s, err = sbserver.NewCRIService(c, client, getNRIAPI(ic))
 	} else {
-		log.G(ctx).Info("using legacy CRI server")
+		log.G(ctx).Debug("using legacy CRI server")
 		s, err = server.NewCRIService(c, client, clientMap, getNRIAPI(ic))
 	}
 	if err != nil {

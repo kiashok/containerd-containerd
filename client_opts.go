@@ -175,6 +175,14 @@ func WithPullSnapshotter(snapshotterName string, opts ...snapshots.Opt) RemoteOp
 	}
 }
 
+// WithRuntimeHandler specifies runtime handler to pull image
+func WithRuntimeHandlerForPull(runtimeHandler string, opts ...snapshots.Opt) RemoteOpt {
+	return func(_ *Client, c *RemoteContext) error {
+		c.RuntimeHandler = runtimeHandler
+		return nil
+	}
+}
+
 // WithPullLabel sets a label to be associated with a pulled reference
 func WithPullLabel(key, value string) RemoteOpt {
 	return func(_ *Client, rc *RemoteContext) error {

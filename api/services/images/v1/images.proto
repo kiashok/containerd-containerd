@@ -84,6 +84,7 @@ message Image {
 
 message GetImageRequest {
 	string name = 1;
+	string RuntimeHandler = 2;
 }
 
 message GetImageResponse {

@@ -66,6 +66,7 @@ func toCRIImage(image imagestore.Image) *runtime.Image {
 
 	runtimeImage := &runtime.Image{
 		Id:          image.ID,
+		//???RuntimeHandler: image.Spec.RuntimeHandler,
 		RepoTags:    repoTags,
 		RepoDigests: repoDigests,
 		Size_:       uint64(image.Size),

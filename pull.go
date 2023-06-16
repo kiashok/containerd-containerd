@@ -105,6 +105,7 @@ func (c *Client) Pull(ctx context.Context, ref string, opts ...RemoteOpt) (_ Ima
 			platformMatcher = platforms.All
 		}
 
+		log.G(ctx).Debugf("!! client.fetch() from pullCtx.Unpack if case, platformmatcher %v", platformMatcher)
 		// Check client Unpack config
 		platform := unpack.Platform{
 			Platform:       platformMatcher,
@@ -283,6 +284,7 @@ func (c *Client) fetch(ctx context.Context, rCtx *RemoteContext, ref string, lim
 		Name:   name,
 		Target: desc,
 		Labels: rCtx.Labels,
+		RuntimeHandler: rCtx.RuntimeHandler,
 	}, nil
 }
 

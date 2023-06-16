@@ -128,11 +128,12 @@ func NewCRIService(config criconfig.Config, client *containerd.Client, clientMap
 	labels := label.NewStore()
 	c := &criService{
 		config:                      config,
+		client:						 client,
 		clientMap:                   clientMap,
 		os:                          osinterface.RealOS{},
 		sandboxStore:                sandboxstore.NewStore(labels),
 		containerStore:              containerstore.NewStore(labels),
-		imageStore:                  imagestore.NewStore(client),
+		imageStore:                  imagestore.NewStore(client, clientMap),
 		snapshotStore:               snapshotstore.NewStore(),
 		sandboxNameIndex:            registrar.NewRegistrar(),
 		containerNameIndex:          registrar.NewRegistrar(),

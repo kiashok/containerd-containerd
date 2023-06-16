@@ -196,7 +196,8 @@ func (c *criService) toContainerdImage(ctx context.Context, image imagestore.Ima
 	if len(image.References) == 0 {
 		return nil, fmt.Errorf("invalid image with no reference %q", image.ID)
 	}
-	return c.client.GetImage(ctx, image.References[0])
+	client := GetClientForRuntimeHandler(c, image.RuntimeHandler)
+	return client.GetImage(ctx, image.References[0])
 }
 
 // getUserFromImage gets uid or user name of the image user.
@@ -218,9 +219,47 @@ func getUserFromImage(user string) (*int64, string) {
 	return &uid, ""
 }
 
+func GetClientForRuntimeHandler(c *criService, runtimeHdlr string) *containerd.Client {
+	log.G(context.Background()).Debugf("!! GetClientForRuntimeHandler runtimehdlr %v", runtimeHdlr)
+	if runtimeHdlr == "" {
+		runtimeHdlr = c.config.ContainerdConfig.DefaultRuntimeName
+	}
+	log.G(context.Background()).Debugf("!! criService.GetClientForRuntimeHandler, runtimeHdlr %v",runtimeHdlr)
+
+	ociRuntime, ok := c.config.ContainerdConfig.Runtimes[runtimeHdlr] // read handler.Runtimes.OSVersion etc
+	//log.G(ctx).Debugf("!!! criservice.PullImage() ok %v", ok)
+	if !ok {
+		log.G(context.Background()).Errorf("failed to get runtime %v", runtimeHdlr)
+		return c.client
+		//return nil, fmt.Errorf("no runtime for %q is configured", runtimeHdlr)
+	}
+
+	// get runtime options for windows pods and check if its process isolated or hyperV
+	if ociRuntime.Type == runtimeRunhcsV1 {
+		runtimeOpts, err := generateRuntimeOptions(ociRuntime, c.config)
+		if err != nil {
+			//return nil, fmt.Errorf("failed to generate runtime options: %w", err)
+			return c.client
+		}
+		rhcso, ok := runtimeOpts.(*runhcsoptions.Options)
+		if ok {
+			if rhcso.SandboxIsolation == 1 { // hyperV isolated
+				// we need to use the appropriate client using runtimeHdlr for this client.Pull() call
+				//image, err := c.clientMap[runtimeHdlr].Pull(pctx, ref, pullOpts...)
+				log.G(context.Background()).Debugf("!! criservice.GetClientForRuntimeHandler() client %v, guestPlatform %v", c.clientMap[runtimeHdlr], ociRuntime.GuestPlatform)
+				return c.clientMap[runtimeHdlr]
+				// TODO: above line check for nil
+				// why not c.runtime below?
+				
+			}
+		}
+	}
+	return c.client
+}
+
 // ensureImageExists returns corresponding metadata of the image reference, if image is not
 // pulled yet, the function will pull the image.
-func (c *criService) ensureImageExists(ctx context.Context, ref string, config *runtime.PodSandboxConfig) (*imagestore.Image, error) {
+func (c *criService) ensureImageExists(ctx context.Context, ref string, runtimeHandler string, config *runtime.PodSandboxConfig) (*imagestore.Image, error) {
 	image, err := c.localResolve(ref)
 	if err != nil && !errdefs.IsNotFound(err) {
 		return nil, fmt.Errorf("failed to get image %q: %w", ref, err)
@@ -229,7 +268,7 @@ func (c *criService) ensureImageExists(ctx context.Context, ref string, config *
 		return &image, nil
 	}
 	// Pull image to ensure the image exists
-	resp, err := c.PullImage(ctx, &runtime.PullImageRequest{Image: &runtime.ImageSpec{Image: ref}, SandboxConfig: config})
+	resp, err := c.PullImage(ctx, &runtime.PullImageRequest{Image: &runtime.ImageSpec{Image: ref, RuntimeHandler: runtimeHandler}, SandboxConfig: config})
 	if err != nil {
 		return nil, fmt.Errorf("failed to pull image %q: %w", ref, err)
 	}

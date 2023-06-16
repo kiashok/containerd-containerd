@@ -46,6 +46,7 @@ import (
 	contentproxy "github.com/containerd/containerd/content/proxy"
 	"github.com/containerd/containerd/defaults"
 	"github.com/containerd/containerd/errdefs"
+	"github.com/containerd/containerd/log"
 	"github.com/containerd/containerd/events"
 	"github.com/containerd/containerd/images"
 	"github.com/containerd/containerd/leases"
@@ -104,6 +105,7 @@ func New(address string, opts ...ClientOpt) (*Client, error) {
 	} else {
 		c.runtime = defaults.DefaultRuntime
 	}
+
 
 	if copts.runtimeHandler != "" {
 		c.runtimeHandler = copts.runtimeHandler
@@ -230,6 +232,7 @@ type Client struct {
 	connMu    sync.Mutex
 	conn      *grpc.ClientConn
 	runtime   string
+	runtimeHandler string
 	defaultns string
 	platform  platforms.MatchComparer
 	connector func() (*grpc.ClientConn, error)
@@ -349,6 +352,7 @@ type RemoteContext struct {
 	// Snapshotter used for unpacking
 	Snapshotter string
 
+	RuntimeHandler string
 	// SnapshotterOpts are additional options to be passed to a snapshotter during pull
 	SnapshotterOpts []snapshots.Opt
 
@@ -505,6 +509,7 @@ func (c *Client) GetImage(ctx context.Context, ref string) (Image, error) {
 	if err != nil {
 		return nil, err
 	}
+	i.RuntimeHandler = c.runtimeHandler
 	return NewImage(c, i), nil
 }
 

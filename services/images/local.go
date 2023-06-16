@@ -90,6 +90,7 @@ func (l *local) Get(ctx context.Context, req *imagesapi.GetImageRequest, _ ...gr
 	imagepb := imageToProto(&image)
 	return &imagesapi.GetImageResponse{
 		Image: imagepb,
+//		RuntimeHandler: req.RuntimeHandler,
 	}, nil
 }
 
@@ -125,10 +126,11 @@ func (l *local) Create(ctx context.Context, req *imagesapi.CreateImageRequest, _
 
 	resp.Image = imageToProto(&created)
 
+	log.G(ctx).Debugf("!! local.Create() create ImageCreate, runtimeHandler %v", req.Image.RuntimeHandler)
 	if err := l.publisher.Publish(ctx, "/images/create", &eventstypes.ImageCreate{
 		Name:   resp.Image.Name,
 		Labels: resp.Image.Labels,
-		RuntimeHanlder: resp.Image.RuntimeHandler,
+		RuntimeHandler: req.Image.RuntimeHandler,
 	}); err != nil {
 		return nil, err
 	}
@@ -141,7 +143,7 @@ func (l *local) Update(ctx context.Context, req *imagesapi.UpdateImageRequest, _
 	if req.Image.Name == "" {
 		return nil, status.Errorf(codes.InvalidArgument, "Image.Name required")
 	}
-
+	log.G(ctx).Debugf("create image update")
 	var (
 		image      = imageFromProto(req.Image)
 		resp       imagesapi.UpdateImageResponse
@@ -163,11 +165,11 @@ func (l *local) Update(ctx context.Context, req *imagesapi.UpdateImageRequest, _
 	}
 
 	resp.Image = imageToProto(&updated)
-
+	log.G(ctx).Debugf("!! local.Update() create ImageUpdate, runtimeHandler %v", req.Image.RuntimeHandler)
 	if err := l.publisher.Publish(ctx, "/images/update", &eventstypes.ImageUpdate{
 		Name:   resp.Image.Name,
 		Labels: resp.Image.Labels,
-		RuntimeHandler: resp.Image.RuntimeHandler,
+		RuntimeHandler: req.Image.RuntimeHandler,
 	}); err != nil {
 		return nil, err
 	}
@@ -184,7 +186,7 @@ func (l *local) Delete(ctx context.Context, req *imagesapi.DeleteImageRequest, _
 
 	if err := l.publisher.Publish(ctx, "/images/delete", &eventstypes.ImageDelete{
 		Name: req.Name,
-		RuntimeHandler: req.RuntimeHandler,
+		//RuntimeHandler: req.RuntimeHandler,
 	}); err != nil {
 		return nil, err
 	}

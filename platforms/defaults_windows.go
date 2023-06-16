@@ -53,20 +53,28 @@ func (m windowsmatcher) Match(p specs.Platform) bool {
 	match := m.defaultMatcher.Match(p)
 
 	if match && m.OS == "windows" {
+		//
 		hostMajorMinorVersion := majorMinor(m.osVersionPrefix)
 		hostOsBuildNum := buildNumber(m.osVersionPrefix)
 		ctrMajorMinorVersion := majorMinor(p.OSVersion)
 		ctrOsBuildNum := buildNumber(p.OSVersion)
-		
+		log.G(context.Background()).Debugf("!! in windowsmatcher match() m: %v, p: %v", m, p)
+
 		if hostMajorMinorVersion != ctrMajorMinorVersion {
 			return false
 		}
-
+		_, file, no, ok := runtime.Caller(2)
+		if ok {
+			//fmt.Printf("called from %s#%d\n", file, no)
+			log.G(context.Background()).Debugf("!! windoiwsmatch() file: %v no %v", file, no)
+		}
 		// TODO: Add the matrix for supporting previous ltsc version if host is annual release
 		// if host is ltsc then supports only itself and not older ones?
 		if hostOsBuildNum >= osversion.V21H2Server || hostOsBuildNum == osversion.V21H2Win11 {
 			log.G(context.Background()).Debugf("!! in windowsmatcher match(), >= WS2022/Win11")
-			return (ctrOsBuildNum >= osversion.V21H2Server)
+			if ctrOsBuildNum >= osversion.V21H2Server {
+				return true
+			}
 		}
 
 		// orig

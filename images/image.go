@@ -40,6 +40,7 @@ type Image struct {
 	// This field is required.
 	Name string
 
+	RuntimeHandler string
 	// Labels provide runtime decoration for the image record.
 	//
 	// There is no default behavior for how these labels are propagated. They
@@ -103,6 +104,7 @@ func (image *Image) Config(ctx context.Context, provider content.Provider, platf
 // These are used to verify that a set of layers unpacked to the expected
 // values.
 func (image *Image) RootFS(ctx context.Context, provider content.Provider, platform platforms.MatchComparer) ([]digest.Digest, error) {
+	log.G(ctx).Debugf("!! image.RootFS(,,,), ctrd.image is %v, platformMatcher %v", platform)
 	desc, err := image.Config(ctx, provider, platform)
 	if err != nil {
 		return nil, err
@@ -196,6 +198,15 @@ func Manifest(ctx context.Context, provider content.Provider, image ocispec.Desc
 
 			return nil, nil
 		case MediaTypeDockerSchema2ManifestList, ocispec.MediaTypeImageIndex:
+			/*
+			_, file, no, ok := runtime.Caller(3)
+			if ok {
+				fmt.Printf("called from %s#%d\n", file, no)
+				log.G(ctx).Debugf("!! Manifest() file: %v no %v", file, no)
+			}
+			log.G(ctx).Debugf("!! RootFS() image i %v", i)
+		*/
+		log.G(ctx).Debugf("!! In Manifest() , platform mather %v", platform)
 			p, err := content.ReadBlob(ctx, provider, desc)
 			if err != nil {
 				return nil, err
