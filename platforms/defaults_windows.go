@@ -22,6 +22,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/containerd/containerd/vendor/github.com/Microsoft/hcsshim/osversion"
 	specs "github.com/opencontainers/image-spec/specs-go/v1"
 	"golang.org/x/sys/windows"
 )
@@ -50,6 +51,24 @@ func (m windowsmatcher) Match(p specs.Platform) bool {
 	match := m.defaultMatcher.Match(p)
 
 	if match && m.OS == "windows" {
+		// Stable ABI compliance check
+		hostOSMajorMinorVersion := GetMajorMinorVersion(m.osVersionPrefix)
+		hostOsBuildNum := GetOSBuildNumber(m.osVersionPrefix)
+		ctrImgMajorMinorVersion := GetMajorMinorVersion(p.OSVersion)
+		ctrImgBuildNum := GetOSBuildNumber(p.OSVersion)
+
+		if hostOSMajorMinorVersion != ctrImgMajorMinorVersion ||
+			hostOSMajorMinorVersion == "" || ctrImgMajorMinorVersion == "" {
+			return false
+		}
+
+		if hostOsBuildNum >= osversion.V21H2Server || hostOsBuildNum == osversion.V21H2Win11 {
+			if ctrImgBuildNum >= osversion.V21H2Server {
+				return true
+			}
+		}
+
+		// Look for exact version match if host OS is not stable ABI complaint
 		if strings.HasPrefix(p.OSVersion, m.osVersionPrefix) {
 			return true
 		}
@@ -69,6 +88,27 @@ func (m windowsmatcher) Less(p1, p2 specs.Platform) bool {
 		return r1 > r2
 	}
 	return m1 && !m2
+}
+
+func GetMajorMinorVersion(v string) string {
+	parts := strings.Split(v, ".")
+	if len(parts) < 2 {
+		return ""
+	}
+	return strings.Join(parts[0:2], ".")
+}
+
+func GetOSBuildNumber(v string) int {
+	parts := strings.Split(v, ".")
+	if len(parts) < 3 {
+		return 0
+	}
+
+	r, err := strconv.Atoi(parts[2])
+	if err != nil {
+		return 0
+	}
+	return r
 }
 
 func revision(v string) int {
