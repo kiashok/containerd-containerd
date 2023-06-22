@@ -63,9 +63,9 @@ func WithContentStore(contentStore content.Store) ServicesOpt {
 }
 
 // WithImageClient sets the image service to use using an images client.
-func WithImageClient(imageService imagesapi.ImagesClient) ServicesOpt {
+func WithImageClient(imageService imagesapi.ImagesClient, runtimeHandler string) ServicesOpt {
 	return func(s *services) {
-		s.imageStore = NewImageStoreFromClient(imageService)
+		s.imageStore = NewImageStoreFromClient(imageService, runtimeHandler)
 	}
 }
 
@@ -212,7 +212,7 @@ func WithInMemoryServices(ic *plugin.InitContext) ClientOpt {
 				return WithContentStore(s.(content.Store))
 			},
 			srv.ImagesService: func(s interface{}) ServicesOpt {
-				return WithImageClient(s.(imagesapi.ImagesClient))
+				return WithImageClient(s.(imagesapi.ImagesClient), ic.Meta.RuntimeHandler)
 			},
 			srv.SnapshotsService: func(s interface{}) ServicesOpt {
 				return WithSnapshotters(s.(map[string]snapshots.Snapshotter))

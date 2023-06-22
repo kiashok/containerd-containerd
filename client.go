@@ -509,7 +509,7 @@ func (c *Client) GetImage(ctx context.Context, ref string) (Image, error) {
 	if err != nil {
 		return nil, err
 	}
-	i.RuntimeHandler = c.runtimeHandler
+	//i.RuntimeHandler = c.runtimeHandler
 	return NewImage(c, i), nil
 }
 
@@ -673,7 +673,7 @@ func (c *Client) ImageService() images.Store {
 	}
 	c.connMu.Lock()
 	defer c.connMu.Unlock()
-	return NewImageStoreFromClient(imagesapi.NewImagesClient(c.conn))
+	return NewImageStoreFromClient(imagesapi.NewImagesClient(c.conn), c.runtimeHandler)
 }
 
 // DiffService returns the underlying Differ

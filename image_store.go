@@ -34,12 +34,14 @@ import (
 
 type remoteImages struct {
 	client imagesapi.ImagesClient
+	runtimeHandler string
 }
 
 // NewImageStoreFromClient returns a new image store client
-func NewImageStoreFromClient(client imagesapi.ImagesClient) images.Store {
+func NewImageStoreFromClient(client imagesapi.ImagesClient, runtimeHandler string) images.Store {
 	return &remoteImages{
 		client: client,
+		runtimeHandler: runtimeHandler,
 	}
 }
 
@@ -70,7 +72,7 @@ func (s *remoteImages) Create(ctx context.Context, image images.Image) (images.I
 	log.G(ctx).Debugf("!! remoteImages.Create(), image: %v", image)
 	req := &imagesapi.CreateImageRequest{
 		Image: imageToProto(&image),
-//		RuntimeHandler: runtimeHandler,
+		RuntimeHandler: s.runtimeHandler,
 	}
 //req.Image.RuntimeHandler = runtimeHandler
 
@@ -96,7 +98,7 @@ func (s *remoteImages) Update(ctx context.Context, image images.Image, fieldpath
 	req := &imagesapi.UpdateImageRequest{
 		Image:      imageToProto(&image),
 		UpdateMask: updateMask,
-	//	RuntimeHandler: runtimeHandler,
+		RuntimeHandler: s.runtimeHandler,
 	}
 //	req.Image.RuntimeHandler = runtimeHandler
 
@@ -133,7 +135,7 @@ func imageToProto(image *images.Image) *imagesapi.Image {
 		Target:    descToProto(&image.Target),
 		CreatedAt: protobuf.ToTimestamp(image.CreatedAt),
 		UpdatedAt: protobuf.ToTimestamp(image.UpdatedAt),
-		RuntimeHandler: image.RuntimeHandler,
+		//RuntimeHandler: image.RuntimeHandler,
 	}
 }
 
@@ -144,7 +146,7 @@ func imageFromProto(imagepb *imagesapi.Image) images.Image {
 		Target:    descFromProto(imagepb.Target),
 		CreatedAt: protobuf.FromTimestamp(imagepb.CreatedAt),
 		UpdatedAt: protobuf.FromTimestamp(imagepb.UpdatedAt),
-		RuntimeHandler: imagepb.RuntimeHandler,
+		//RuntimeHandler: imagepb.RuntimeHandler,
 	}
 }
 

@@ -326,7 +326,7 @@ func (c *criService) createImageReference(ctx context.Context, name string, runt
 		Target: desc,
 		// Add a label to indicate that the image is managed by the cri plugin.
 		Labels: labels,
-		RuntimeHandler: runtimeHandler,
+		//RuntimeHandler: runtimeHandler,
 	}
 	//client := c.clientMap[runtimeHdlr]
 	client := GetClientForRuntimeHandler(c, runtimeHandler) // this needs to change to above

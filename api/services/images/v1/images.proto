@@ -77,9 +77,6 @@ message Image {
 
 	// UpdatedAt is the last time the image was mutated.
 	google.protobuf.Timestamp updated_at = 8;
-
-	// Runtime handler used to pull this image
-	string RuntimeHandler = 9;
 }
 
 message GetImageRequest {
@@ -95,6 +92,7 @@ message CreateImageRequest {
 	Image image = 1;
 
 	google.protobuf.Timestamp source_date_epoch = 2;
+	string RuntimeHandler = 3;
 }
 
 message CreateImageResponse {
@@ -112,6 +110,7 @@ message UpdateImageRequest {
 	google.protobuf.FieldMask update_mask = 2;
 
 	google.protobuf.Timestamp source_date_epoch = 3;
+	string RuntimeHandler = 4;
 }
 
 message UpdateImageResponse {

@@ -65,6 +65,7 @@ type Meta struct {
 	Platforms    []ocispec.Platform // platforms supported by plugin
 	Exports      map[string]string  // values exported by plugin
 	Capabilities []string           // feature switches for plugin
+	RuntimeHandler string			// runtime handler to set for image.store on the client
 }
 
 // Plugin represents an initialized plugin, used with an init context.

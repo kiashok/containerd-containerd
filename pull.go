@@ -52,8 +52,8 @@ func (c *Client) Pull(ctx context.Context, ref string, opts ...RemoteOpt) (_ Ima
 		}
 	}
 
-	log.G(ctx).Debugf(" !!client.Pull(), client %v", c)
-	log.G(ctx).Debugf("!! client.Pull() pullCtx.Platforms %v", pullCtx.PlatformMatcher)
+	log.G(ctx).Debugf("!! client.Pull(), client %v", c)
+	//log.G(ctx).Debugf("!! client.Pull() pullCtx.Platforms %v", pullCtx.PlatformMatcher)
 	if pullCtx.PlatformMatcher == nil {
 		if len(pullCtx.Platforms) > 1 {
 			log.G(ctx).Debugf("!! client.Pull() len(pullCtx.Platforms) > 1")
@@ -61,7 +61,7 @@ func (c *Client) Pull(ctx context.Context, ref string, opts ...RemoteOpt) (_ Ima
 		} else if len(pullCtx.Platforms) == 0 {
 			log.G(ctx).Debugf("!! client.Pull() len(pullCtx.Platforms) == 0")
 			pullCtx.PlatformMatcher = c.platform
-			log.G(ctx).Debugf(" !!client.Pull() len(pullCtx.Platforms) == 0, platformMatcher %v", pullCtx.PlatformMatcher)
+		//	log.G(ctx).Debugf(" !!client.Pull() len(pullCtx.Platforms) == 0, platformMatcher %v", pullCtx.PlatformMatcher)
 		} else {
 			log.G(ctx).Debugf("!! client.Pull() else for pullCtx.PlatformMatcher == nil")
 			p, err := platforms.Parse(pullCtx.Platforms[0])
@@ -72,6 +72,8 @@ func (c *Client) Pull(ctx context.Context, ref string, opts ...RemoteOpt) (_ Ima
 			pullCtx.PlatformMatcher = platforms.Only(p)
 		}
 	}
+
+	log.G(ctx).Debugf("!! client.Pull() pullCtx.Platforms %v", pullCtx.PlatformMatcher)
 
 	span.SetAttributes(
 		tracing.Attribute("image.ref", ref),
@@ -181,7 +183,7 @@ func (c *Client) Pull(ctx context.Context, ref string, opts ...RemoteOpt) (_ Ima
 }
 
 func (c *Client) fetch(ctx context.Context, rCtx *RemoteContext, ref string, limit int) (images.Image, error) {
-	log.G(ctx).Debugf(" !!client.fetch(), rCtx %v", rCtx)
+	log.G(ctx).Debugf("!! client.fetch(), rCtx %v", rCtx)
 	ctx, span := tracing.StartSpan(ctx, tracing.Name(pullSpanPrefix, "fetch"))
 	defer span.End()
 	store := c.ContentStore()
@@ -203,7 +205,7 @@ func (c *Client) fetch(ctx context.Context, rCtx *RemoteContext, ref string, lim
 		limiter       *semaphore.Weighted
 	)
 
-	log.G(ctx).Debugf(" !!client.fetch(), desc.MediaType %v", desc.MediaType)
+	log.G(ctx).Debugf("!! client.fetch(), desc.MediaType %v", desc.MediaType)
 	if desc.MediaType == images.MediaTypeDockerSchema1Manifest && rCtx.ConvertSchema1 {
 		schema1Converter := schema1.NewConverter(store, fetcher)
 
@@ -284,7 +286,7 @@ func (c *Client) fetch(ctx context.Context, rCtx *RemoteContext, ref string, lim
 		Name:   name,
 		Target: desc,
 		Labels: rCtx.Labels,
-		RuntimeHandler: rCtx.RuntimeHandler,
+		//RuntimeHandler: rCtx.RuntimeHandler,
 	}, nil
 }
 

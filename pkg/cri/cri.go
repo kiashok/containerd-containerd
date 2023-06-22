@@ -106,14 +106,16 @@ func initCRIService(ic *plugin.InitContext) (interface{}, error) {
 		//else {
 		//	guestPlatform = platforms.DefaultSpec()
 		//}
-		
+		// this will set runtime handler in remoteImagesContext for images.store on every client object
+		ic.Meta.RuntimeHandler = k
+
 		clientMap[k], err = containerd.New(
 			"",
 			containerd.WithDefaultNamespace(constants.K8sContainerdNamespace),
 			containerd.WithGuestPlatform(guestPlatform),
 			//containerd.WithDefaultPlatform(platforms.Default()),
-			containerd.WithInMemoryServices(ic),
 			containerd.WithRuntimeHandler(k),
+			containerd.WithInMemoryServices(ic),
 		)
 
 		if err != nil {

@@ -126,11 +126,11 @@ func (l *local) Create(ctx context.Context, req *imagesapi.CreateImageRequest, _
 
 	resp.Image = imageToProto(&created)
 
-	log.G(ctx).Debugf("!! local.Create() create ImageCreate, runtimeHandler %v", req.Image.RuntimeHandler)
+	log.G(ctx).Debugf("!! local.Create() create ImageCreate, runtimeHandler %v", req.RuntimeHandler)
 	if err := l.publisher.Publish(ctx, "/images/create", &eventstypes.ImageCreate{
 		Name:   resp.Image.Name,
 		Labels: resp.Image.Labels,
-		RuntimeHandler: req.Image.RuntimeHandler,
+		RuntimeHandler: req.RuntimeHandler,
 	}); err != nil {
 		return nil, err
 	}
@@ -165,11 +165,11 @@ func (l *local) Update(ctx context.Context, req *imagesapi.UpdateImageRequest, _
 	}
 
 	resp.Image = imageToProto(&updated)
-	log.G(ctx).Debugf("!! local.Update() create ImageUpdate, runtimeHandler %v", req.Image.RuntimeHandler)
+	log.G(ctx).Debugf("!! local.Update() create ImageUpdate, runtimeHandler %v", req.RuntimeHandler)
 	if err := l.publisher.Publish(ctx, "/images/update", &eventstypes.ImageUpdate{
 		Name:   resp.Image.Name,
 		Labels: resp.Image.Labels,
-		RuntimeHandler: req.Image.RuntimeHandler,
+		RuntimeHandler: req.RuntimeHandler,
 	}); err != nil {
 		return nil, err
 	}
