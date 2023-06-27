@@ -24,7 +24,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"runtime"
+	//"runtime"
 
 	"github.com/containerd/containerd/content"
 	"github.com/containerd/containerd/log"
@@ -168,11 +168,13 @@ func (i *image) RootFS(ctx context.Context) ([]digest.Digest, error) {
 	
 	i.mu.Lock()
 	defer i.mu.Unlock()
+	/*
 	_, file, no, ok := runtime.Caller(1)
 	if ok {
 		fmt.Printf("called from %s#%d\n", file, no)
 		log.G(ctx).Debugf("!! RootFS() file: %v no %v", file, no)
 	}
+	*/
 	log.G(ctx).Debugf("!! RootFS() image i %v", i)
 
 	if i.diffIDs != nil {

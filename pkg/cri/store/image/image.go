@@ -92,7 +92,7 @@ func (s *Store) Update(ctx context.Context, ref string, runtimeHandler string) e
 		log.G(ctx).Debugf("!! cri/store Update() file: %v no %v", file, no)
 	}
 
-	client := s.clientMap[runtimeHandler]
+	client := s.clientMap[runtimeHandler]  ///???
 	i, err := client.GetImage(ctx, ref)
 	if err != nil && !errdefs.IsNotFound(err) {
 		return fmt.Errorf("get image from containerd: %w", err)

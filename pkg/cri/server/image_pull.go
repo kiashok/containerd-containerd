@@ -50,6 +50,8 @@ import (
 	"github.com/containerd/containerd/remotes/docker"
 	"github.com/containerd/containerd/remotes/docker/config"
 	"github.com/containerd/containerd/tracing"
+	"github.com/pelletier/go-toml"
+	runtimeoptions "github.com/containerd/containerd/pkg/runtimeoptions/v1"
 )
 
 // For image management:
@@ -332,6 +334,7 @@ func (c *criService) createImageReference(ctx context.Context, name string, runt
 	client := GetClientForRuntimeHandler(c, runtimeHandler) // this needs to change to above
 	// TODO(random-liu): Figure out which is the more performant sequence create then update or
 	// update then create.
+	log.G(ctx).Debugf("!! createImageRef client is %v", client)
 	oldImg, err := client.ImageService().Create(ctx, img)
 	if err == nil || !errdefs.IsAlreadyExists(err) {
 		return err
@@ -341,6 +344,32 @@ func (c *criService) createImageReference(ctx context.Context, name string, runt
 	}
 	_, err = client.ImageService().Update(ctx, img, "target", "labels."+crilabels.ImageLabelKey)
 	return err
+}
+
+// generateRuntimeOptions generates runtime options from cri plugin config.
+func generateRuntimeOptions(r criconfig.Runtime, c criconfig.Config) (interface{}, error) {
+	if r.Options == nil {
+		return nil, nil
+	}
+	optionsTree, err := toml.TreeFromMap(r.Options)
+	if err != nil {
+		return nil, err
+	}
+	options := getRuntimeOptionsType(r.Type)
+	if err := optionsTree.Unmarshal(options); err != nil {
+		return nil, err
+	}
+
+	// For generic configuration, if no config path specified (preserving old behavior), pass
+	// the whole TOML configuration section to the runtime.
+	if runtimeOpts, ok := options.(*runtimeoptions.Options); ok && runtimeOpts.ConfigPath == "" {
+		runtimeOpts.ConfigBody, err = optionsTree.Marshal()
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal TOML blob for runtime %q: %v", r.Type, err)
+		}
+	}
+
+	return options, nil
 }
 
 // getLabels get image labels to be added on CRI image
@@ -360,6 +389,7 @@ func (c *criService) getLabels(ctx context.Context, name string) map[string]stri
 	}
 	return labels
 }
+
 
 // updateImage updates image store to reflect the newest state of an image reference
 // in containerd. If the reference is not managed by the cri plugin, the function also

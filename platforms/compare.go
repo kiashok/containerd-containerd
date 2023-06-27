@@ -19,11 +19,11 @@ package platforms
 import (
 	"strconv"
 	"strings"
-	"context"
-	"runtime"
+//	"context"
+//	"runtime"
 
 	specs "github.com/opencontainers/image-spec/specs-go/v1"
-	"github.com/containerd/containerd/log"
+//	"github.com/containerd/containerd/log"
 )
 
 // MatchComparer is able to match and compare platforms to
@@ -143,6 +143,7 @@ type orderedPlatformComparer struct {
 }
 
 func (c orderedPlatformComparer) Match(platform specs.Platform) bool {
+/*
 	for i:=1; i<=5; i++ {
 	_, file, no, ok := runtime.Caller(i)
 	if ok {
@@ -150,6 +151,7 @@ func (c orderedPlatformComparer) Match(platform specs.Platform) bool {
 		log.G(context.Background()).Debugf("!! compare.go Match() file: %v no %v", file, no)
 	}
 }
+*/
 	for _, m := range c.matchers {
 		if m.Match(platform) {
 			return true

@@ -39,6 +39,7 @@ type remoteImages struct {
 
 // NewImageStoreFromClient returns a new image store client
 func NewImageStoreFromClient(client imagesapi.ImagesClient, runtimeHandler string) images.Store {
+	log.G(context.Background()).Debugf("!! NewImageStoreFromClient, runtimeHandler() %v", runtimeHandler)
 	return &remoteImages{
 		client: client,
 		runtimeHandler: runtimeHandler,

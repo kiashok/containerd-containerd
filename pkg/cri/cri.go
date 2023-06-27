@@ -20,7 +20,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"reflect"
+	//"reflect"
 	"path/filepath"
 	"context"
 
@@ -37,8 +37,17 @@ import (
 	criconfig "github.com/containerd/containerd/pkg/cri/config"
 	"github.com/containerd/containerd/pkg/cri/constants"
 	"github.com/containerd/containerd/pkg/cri/server"
+	"github.com/pelletier/go-toml"
+	runcoptions "github.com/containerd/containerd/runtime/v2/runc/options"
+	runtimeoptions "github.com/containerd/containerd/pkg/runtimeoptions/v1"
+	runhcsoptions "github.com/Microsoft/hcsshim/cmd/containerd-shim-runhcs-v1/options"
+//	runtimeoptions "github.com/containerd/containerd/pkg/runtimeoptions/v1"
 )
 
+const (
+		// runtimeRunhcsV1 is the runtime type for runhcs.
+		runtimeRunhcsV1 = "io.containerd.runhcs.v1"
+)
 // Register CRI service plugin
 func init() {
 	config := criconfig.DefaultConfig()
@@ -53,6 +62,43 @@ func init() {
 		},
 		InitFn: initCRIService,
 	})
+}
+
+func generateRuntimeOptions(r criconfig.Runtime, c criconfig.Config) (interface{}, error) {
+	if r.Options == nil {
+		return nil, nil
+	}
+	optionsTree, err := toml.TreeFromMap(r.Options)
+	if err != nil {
+		return nil, err
+	}
+	options := getRuntimeOptionsType(r.Type)
+	if err := optionsTree.Unmarshal(options); err != nil {
+		return nil, err
+	}
+
+	// For generic configuration, if no config path specified (preserving old behavior), pass
+	// the whole TOML configuration section to the runtime.
+	if runtimeOpts, ok := options.(*runtimeoptions.Options); ok && runtimeOpts.ConfigPath == "" {
+		runtimeOpts.ConfigBody, err = optionsTree.Marshal()
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal TOML blob for runtime %q: %v", r.Type, err)
+		}
+	}
+
+	return options, nil
+}
+
+// getRuntimeOptionsType gets empty runtime options by the runtime type name.
+func getRuntimeOptionsType(t string) interface{} {
+	switch t {
+	case plugin.RuntimeRuncV2:
+		return &runcoptions.Options{}
+	case runtimeRunhcsV1:
+		return &runhcsoptions.Options{}
+	default:
+		return &runtimeoptions.Options{}
+	}
 }
 
 func initCRIService(ic *plugin.InitContext) (interface{}, error) {
@@ -80,44 +126,86 @@ func initCRIService(ic *plugin.InitContext) (interface{}, error) {
 
 	log.G(ctx).Info("Connect containerd service")
 	
+	imagePlatform := imagespec.Platform {
+		Architecture: "",
+		OS: "",
+		OSFeatures: []string{},
+		OSVersion: "",
+		Variant: "",
+	}
+	//imagePlatform := imagespec.Platform{}
+	ic.Meta.RuntimeHandler = c.PluginConfig.ContainerdConfig.DefaultRuntimeName
 	client, err := containerd.New(
 		"",
 		containerd.WithDefaultNamespace(constants.K8sContainerdNamespace),
 		containerd.WithDefaultPlatform(platforms.Default()),
-	//	containerd.WithRuntimeHandler(c.PluginConfig.ContainerdConfig.DefaultRuntimeName),
+		containerd.WithGuestPlatform(imagePlatform),
+		containerd.WithRuntimeHandler(c.PluginConfig.ContainerdConfig.DefaultRuntimeName),
 	// NOTE: purposely not setting runtime handler here as it is the default client created. We need to use
 	// client in the map for image pull purposes
+		//containerd.WithRuntimeHandler(k),
 		containerd.WithInMemoryServices(ic),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create containerd client: %w", err)
 	}
 
+	log.G(ctx).Debugf("!! InitCriService , default original client %v", client)
 	clientMap := make(map[string]*containerd.Client)
 	for k, r := range c.PluginConfig.ContainerdConfig.Runtimes {
-		var guestPlatform imagespec.Platform
+		//guestPlatform := imagespec.Platform{}
 		log.G(context.Background()).Debugf("!! InitCriService k: %v", k)
 		log.G(context.Background()).Debugf("!! InitCriService r.GuestPlatform: %v", r.GuestPlatform)
 	
-		if !reflect.DeepEqual(r.GuestPlatform, imagespec.Platform{}) {
+/*		
+		if !reflect.DeepEqual(r.GuestPlatform, imagePlatform) {
+			log.G(context.Background()).Debugf("!! InitCriService !empty r.GuestPlatform %v, imagePlatform %v", r.GuestPlatform, imagePlatform)
 			guestPlatform = r.GuestPlatform
 			ic.Meta.Platforms = []imagespec.Platform{guestPlatform}
 		} 
-		//else {
-		//	guestPlatform = platforms.DefaultSpec()
-		//}
-		// this will set runtime handler in remoteImagesContext for images.store on every client object
+*/
 		ic.Meta.RuntimeHandler = k
+
+		// test 
+		ociRuntime, ok := pluginConfig.ContainerdConfig.Runtimes[k] // read handler.Runtimes.OSVersion etc
+		if !ok {
+			log.G(context.Background()).Errorf("failed to get runtime %v", k)
+			//return nil, fmt.Errorf("no runtime for %q is configured", runtimeHdlr)
+		}
+
+		// get runtime options for windows pods and check if its process isolated or hyperV
+		if ociRuntime.Type == runtimeRunhcsV1 {
+			runtimeOpts, err := generateRuntimeOptions(ociRuntime, c)
+			if err != nil {
+				//return nil, fmt.Errorf("failed to generate runtime options: %w", err)
+				//return c.client
+				log.G(context.Background()).Errorf("failed to get runtime options line 150")
+			}
+			rhcso, ok := runtimeOpts.(*runhcsoptions.Options)
+			if ok {
+				if rhcso.SandboxIsolation == 1 { // hyperV isolated
+					// we need to use the appropriate client using runtimeHdlr for this client.Pull() call
+					//image, err := c.clientMap[runtimeHdlr].Pull(pctx, ref, pullOpts...)
+					log.G(context.Background()).Debugf("!!*** criservice init, sandbox isolation is 1")
+					//return c.clientMap[runtimeHdlr]
+					// TODO: above line check for nil
+					// why not c.runtime below?
+				}
+			}
+		}
+		//
 
 		clientMap[k], err = containerd.New(
 			"",
 			containerd.WithDefaultNamespace(constants.K8sContainerdNamespace),
-			containerd.WithGuestPlatform(guestPlatform),
+			//containerd.WithGuestPlatform(guestPlatform),
+			containerd.WithGuestPlatform(r.GuestPlatform),
 			//containerd.WithDefaultPlatform(platforms.Default()),
 			containerd.WithRuntimeHandler(k),
 			containerd.WithInMemoryServices(ic),
 		)
 
+		log.G(context.Background()).Debugf("!! initcriservice, in for, client: %v", clientMap[k])
 		if err != nil {
 			return nil, fmt.Errorf("failed to create containerd clientMap: %w", err)
 		}

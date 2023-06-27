@@ -45,7 +45,7 @@ import (
 
 	runhcsoptions "github.com/Microsoft/hcsshim/cmd/containerd-shim-runhcs-v1/options"
 	imagedigest "github.com/opencontainers/go-digest"
-	"github.com/pelletier/go-toml"
+	//"github.com/pelletier/go-toml"
 	runtime "k8s.io/cri-api/pkg/apis/runtime/v1"
 )
 
@@ -370,6 +370,7 @@ func parseImageReferences(refs []string) ([]string, []string) {
 	return tags, digests
 }
 
+/*
 // generateRuntimeOptions generates runtime options from cri plugin config.
 func generateRuntimeOptions(r criconfig.Runtime, c criconfig.Config) (interface{}, error) {
 	if r.Options == nil {
@@ -395,7 +396,7 @@ func generateRuntimeOptions(r criconfig.Runtime, c criconfig.Config) (interface{
 
 	return options, nil
 }
-
+*/
 // getRuntimeOptionsType gets empty runtime options by the runtime type name.
 func getRuntimeOptionsType(t string) interface{} {
 	switch t {

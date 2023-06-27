@@ -26,7 +26,7 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"reflect"
+	//"reflect"
 
 	containersapi "github.com/containerd/containerd/api/services/containers/v1"
 	contentapi "github.com/containerd/containerd/api/services/content/v1"
@@ -113,19 +113,36 @@ func New(address string, opts ...ClientOpt) (*Client, error) {
 		c.runtimeHandler = ""
 	}
 
+	log.G(context.Background()).Debugf("!! ctrd.New copts.defaultplatform %v", c.platform)
 	if copts.defaultPlatform != nil {
 		c.platform = copts.defaultPlatform
 	} else {
 		c.platform = platforms.Default()
 	}
+	log.G(context.Background()).Debugf("!! ctrd.New c.platform %v before guestPlatform check", c.platform)
 
 	// copts.guestPlatform is set only while creating clientMap. See cri.go
 	//if copts.guestPlatform != ocispec.Platform{} {
-	if !reflect.DeepEqual(copts.guestPlatform, ocispec.Platform{}) {
-		log.G(context.Background()).Debugf("!! ctrd.New() client.runtime %v", c.runtime)
+		/*
+		imagePlatform := ocispec.Platform {
+			Architecture: "",
+            OS: "",
+            OSFeatures: []string{},
+            OSVersion: "",
+            Variant: "",
+		}
+		*/
+	//imagePlatform := ocispec.Platform{}
+	log.G(context.Background()).Debugf("!! ctrd.New copts.guestPlatform %v", copts.guestPlatform)
+	//log.G(context.Background()).Debugf("!! ctrd.New imagePlatform %v", imagePlatform)
+		// this check is not working when its null
+	//if !reflect.DeepEqual(copts.guestPlatform, imagePlatform) {
+	if copts.guestPlatform.OSVersion != "" {
+		log.G(context.Background()).Debugf("!! ctrd.New() guesPlatform.OSVersion != nil %v", copts.guestPlatform.OSVersion)
 		c.platform = platforms.Only(copts.guestPlatform)	
 	}
 
+	log.G(context.Background()).Debugf("!! ctrd.New final c.platform %v", c.platform)
 	if copts.services != nil {
 		c.services = *copts.services
 	}
