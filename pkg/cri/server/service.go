@@ -124,12 +124,13 @@ type criService struct {
 }
 
 // NewCRIService returns a new instance of CRIService
-func NewCRIService(config criconfig.Config, client *containerd.Client, nri *nri.API) (CRIService, error) {
+func NewCRIService(config criconfig.Config, client *containerd.Client, platformMatcherMap map[string]platforms.MatchComparer, nri *nri.API) (CRIService, error) {
 	var err error
 	labels := label.NewStore()
 	c := &criService{
 		config:                      config,
 		client:                      client,
+		platformMatcherMap:			 platformMatcherMap,
 		os:                          osinterface.RealOS{},
 		sandboxStore:                sandboxstore.NewStore(labels),
 		containerStore:              containerstore.NewStore(labels),
