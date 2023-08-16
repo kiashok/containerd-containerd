@@ -23,6 +23,7 @@ import (
 
 	"github.com/containerd/containerd"
 	"github.com/containerd/containerd/errdefs"
+	"github.com/containerd/containerd/platforms"
 	"github.com/containerd/containerd/pkg/cri/labels"
 	"github.com/containerd/containerd/pkg/cri/util"
 	"github.com/containerd/containerd/reference/docker"
@@ -48,6 +49,8 @@ type Image struct {
 	ImageSpec imagespec.Image
 	// Pinned image to prevent it from garbage collection
 	Pinned bool
+	// matchcomparer for each runtime class. For more info, see CriService struct
+	platformMatcherMap map[string]platforms.MatchComparer
 }
 
 // Store stores all images.
