@@ -380,7 +380,7 @@ func (is *simpleImageStore) List(ctx context.Context, filters ...string) ([]imag
 	return imgs, nil
 }
 
-func (is *simpleImageStore) Create(ctx context.Context, image images.Image) (images.Image, error) {
+func (is *simpleImageStore) Create(ctx context.Context, image images.Image, opts ...CreateOpt) (images.Image, error) {
 	is.l.Lock()
 	defer is.l.Unlock()
 
@@ -392,7 +392,7 @@ func (is *simpleImageStore) Create(ctx context.Context, image images.Image) (ima
 	return image, nil
 }
 
-func (is *simpleImageStore) Update(ctx context.Context, image images.Image, fieldpaths ...string) (images.Image, error) {
+func (is *simpleImageStore) Update(ctx context.Context, image images.Image, opts ...UpdateOpt) (images.Image, error) {
 	is.l.Lock()
 	defer is.l.Unlock()
 

@@ -18,7 +18,7 @@ package containerd
 
 import (
 	"fmt"
-	"context"
+//	"context"
 
 	containersapi "github.com/containerd/containerd/api/services/containers/v1"
 	"github.com/containerd/containerd/api/services/diff/v1"
@@ -28,7 +28,7 @@ import (
 	"github.com/containerd/containerd/api/services/tasks/v1"
 	"github.com/containerd/containerd/containers"
 	"github.com/containerd/containerd/content"
-	"github.com/containerd/containerd/log"
+//	"github.com/containerd/containerd/log"
 	"github.com/containerd/containerd/images"
 	"github.com/containerd/containerd/leases"
 	"github.com/containerd/containerd/namespaces"
@@ -65,10 +65,11 @@ func WithContentStore(contentStore content.Store) ServicesOpt {
 }
 
 // WithImageClient sets the image service to use using an images client.
-func WithImageClient(imageService imagesapi.ImagesClient, runtimeHandler string) ServicesOpt {
+func WithImageClient(imageService imagesapi.ImagesClient) ServicesOpt {
 	return func(s *services) {
-		log.G(context.Background()).Debugf("!! WithImageClient runtimehandler %v", runtimeHandler)
-		s.imageStore = NewImageStoreFromClient(imageService, runtimeHandler)
+		//log.G(context.Background()).Debugf("!! WithImageClient runtimehandler %v", runtimeHandler)
+		s.imageStore = NewImageStoreFromClient(imageService)
+		//, runtimeHandler)
 	}
 }
 
@@ -215,7 +216,8 @@ func WithInMemoryServices(ic *plugin.InitContext) ClientOpt {
 				return WithContentStore(s.(content.Store))
 			},
 			srv.ImagesService: func(s interface{}) ServicesOpt {
-				return WithImageClient(s.(imagesapi.ImagesClient), ic.Meta.RuntimeHandler)
+				return WithImageClient(s.(imagesapi.ImagesClient))
+				//, ic.Meta.RuntimeHandler)
 			},
 			srv.SnapshotsService: func(s interface{}) ServicesOpt {
 				return WithSnapshotters(s.(map[string]snapshots.Snapshotter))

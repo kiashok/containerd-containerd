@@ -30,6 +30,7 @@ import (
 	"github.com/containerd/containerd"
 	"github.com/containerd/containerd/log"
 	"github.com/containerd/containerd/oci"
+	"github.com/containerd/containerd/platforms"
 	"github.com/containerd/containerd/pkg/cri/instrument"
 	"github.com/containerd/containerd/pkg/cri/nri"
 	"github.com/containerd/containerd/pkg/cri/streaming"
@@ -94,8 +95,8 @@ type criService struct {
 	// client is an instance of the containerd client
 	client *containerd.Client
 	// client per runtime class defined in containerd's config.toml
-	clientMap map[string]*containerd.Client
-
+	//clientMap map[string]*containerd.Client
+	platformMap map[string]platforms.MatchComparer
 	// streamServer is the streaming server serves container streaming request.
 	streamServer streaming.Server
 	// eventMonitor is the monitor monitors containerd events.
@@ -123,17 +124,17 @@ type criService struct {
 }
 
 // NewCRIService returns a new instance of CRIService
-func NewCRIService(config criconfig.Config, client *containerd.Client, clientMap map[string]*containerd.Client, nri *nri.API) (CRIService, error) {
+func NewCRIService(config criconfig.Config, client *containerd.Client, platformMap map[string]platforms.MatchComparer, nri *nri.API) (CRIService, error) {
 	var err error
 	labels := label.NewStore()
 	c := &criService{
 		config:                      config,
 		client:						 client,
-		clientMap:                   clientMap,
+		platformMap:                 platformMap,
 		os:                          osinterface.RealOS{},
 		sandboxStore:                sandboxstore.NewStore(labels),
 		containerStore:              containerstore.NewStore(labels),
-		imageStore:                  imagestore.NewStore(client, clientMap),
+		imageStore:                  imagestore.NewStore(client, platformMap),
 		snapshotStore:               snapshotstore.NewStore(),
 		sandboxNameIndex:            registrar.NewRegistrar(),
 		containerNameIndex:          registrar.NewRegistrar(),

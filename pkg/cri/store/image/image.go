@@ -24,6 +24,7 @@ import (
 
 	"github.com/containerd/containerd"
 	"github.com/containerd/containerd/log"
+	"github.com/containerd/containerd/platforms"
 	"github.com/containerd/containerd/errdefs"
 	"github.com/containerd/containerd/pkg/cri/labels"
 	"github.com/containerd/containerd/pkg/cri/util"
@@ -64,17 +65,17 @@ type Store struct {
 	refCache map[string]string
 	// client is the containerd client.
 	client *containerd.Client
-	clientMap map[string]*containerd.Client
+	platformMap map[string]platforms.MatchComparer
 	// store is the internal image store indexed by image id.
 	store *store
 }
 
 // NewStore creates an image store.
-func NewStore(client *containerd.Client, clientMap map[string]*containerd.Client) *Store {
+func NewStore(client *containerd.Client, platformMap map[string]platforms.MatchComparer) *Store {
 	return &Store{
 		refCache: make(map[string]string),
 		client:   client,
-		clientMap: clientMap,
+		platformMap: platformMap,
 		store: &store{
 			images:    make(map[string]Image),
 			digestSet: digestset.NewSet(),
@@ -92,13 +93,13 @@ func (s *Store) Update(ctx context.Context, ref string, runtimeHandler string) e
 		log.G(ctx).Debugf("!! cri/store Update() file: %v no %v", file, no)
 	}
 
-	client := s.clientMap[runtimeHandler]  ///???
-	i, err := client.GetImage(ctx, ref)
+	//client := s.platformMap[runtimeHandler]  ///???
+	i, err := s.client.GetImage(ctx, ref)
 	if err != nil && !errdefs.IsNotFound(err) {
 		return fmt.Errorf("get image from containerd: %w", err)
 	}
 
-	log.G(ctx).Debugf("!! cri/store Update, client %v, ctrd.image %v", client, i)
+	log.G(ctx).Debugf("!! cri/store Update, client %v, ctrd.image %v", s.client, i)
 	log.G(ctx).Debugf("!! cri/store image Update, ref %v, runtimeHandler %v", ref, runtimeHandler)
 	
 	//???i.RuntimeHandler = client.RuntimeHandler

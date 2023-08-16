@@ -43,6 +43,7 @@ import (
 	"github.com/containerd/containerd/errdefs"
 	containerdimages "github.com/containerd/containerd/images"
 	"github.com/containerd/containerd/log"
+	"github.com/containerd/containerd/images"
 	"github.com/containerd/containerd/pkg/cri/annotations"
 	criconfig "github.com/containerd/containerd/pkg/cri/config"
 	crilabels "github.com/containerd/containerd/pkg/cri/labels"
@@ -302,7 +303,12 @@ func (c *CRIImageService) createImageReference(ctx context.Context, name string,
 	if oldImg.Target.Digest == img.Target.Digest && oldImg.Labels[crilabels.ImageLabelKey] == labels[crilabels.ImageLabelKey] {
 		return nil
 	}
-	_, err = c.client.ImageService().Update(ctx, img, "target", "labels."+crilabels.ImageLabelKey)
+
+	updateOpts := []images.UpdateOpt {
+		images.WithFieldPaths([]string{"target", fmt.Sprintf("labels.%s",crilabels.ImageLabelKey)}),
+	}
+
+	_, err = c.client.ImageService().Update(ctx, img, updateOpts...)
 	return err
 }
 

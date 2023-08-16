@@ -38,11 +38,11 @@ type remoteImages struct {
 }
 
 // NewImageStoreFromClient returns a new image store client
-func NewImageStoreFromClient(client imagesapi.ImagesClient, runtimeHandler string) images.Store {
-	log.G(context.Background()).Debugf("!! NewImageStoreFromClient, runtimeHandler() %v", runtimeHandler)
+func NewImageStoreFromClient(client imagesapi.ImagesClient) images.Store {
+	//log.G(context.Background()).Debugf("!! NewImageStoreFromClient, runtimeHandler() %v", runtimeHandler)
 	return &remoteImages{
 		client: client,
-		runtimeHandler: runtimeHandler,
+	//	runtimeHandler: runtimeHandler,
 	}
 }
 
@@ -69,11 +69,18 @@ func (s *remoteImages) List(ctx context.Context, filters ...string) ([]images.Im
 	return imagesFromProto(resp.Images), nil
 }
 
-func (s *remoteImages) Create(ctx context.Context, image images.Image) (images.Image, error) {
+func (s *remoteImages) Create(ctx context.Context, image images.Image, opts ...images.CreateOpt) (images.Image, error) {
 	log.G(ctx).Debugf("!! remoteImages.Create(), image: %v", image)
+	var createOptions images.CreateOptions
+	for _, opt := range opts {
+		if err := opt(ctx, &createOptions); err != nil {
+			return images.Image{}, err
+		}
+	}
+
 	req := &imagesapi.CreateImageRequest{
 		Image: imageToProto(&image),
-		RuntimeHandler: s.runtimeHandler,
+		RuntimeHandler: createOptions.RuntimeHandler,
 	}
 //req.Image.RuntimeHandler = runtimeHandler
 
@@ -89,17 +96,24 @@ func (s *remoteImages) Create(ctx context.Context, image images.Image) (images.I
 	return imageFromProto(created.Image), nil
 }
 
-func (s *remoteImages) Update(ctx context.Context, image images.Image, fieldpaths ...string) (images.Image, error) {
+func (s *remoteImages) Update(ctx context.Context, image images.Image, opts ...images.UpdateOpt) (images.Image, error) {
+	var updateOptions images.UpdateOptions
+	for _, opt := range opts {
+		if err := opt(ctx, &updateOptions); err != nil {
+			return images.Image{}, err
+		}
+	}
+	
 	var updateMask *ptypes.FieldMask
-	if len(fieldpaths) > 0 {
+	if len(updateOptions.Fieldpaths) > 0 {
 		updateMask = &ptypes.FieldMask{
-			Paths: fieldpaths,
+			Paths: updateOptions.Fieldpaths,
 		}
 	}
 	req := &imagesapi.UpdateImageRequest{
 		Image:      imageToProto(&image),
 		UpdateMask: updateMask,
-		RuntimeHandler: s.runtimeHandler,
+		RuntimeHandler: updateOptions.RuntimeHandler,
 	}
 //	req.Image.RuntimeHandler = runtimeHandler
 

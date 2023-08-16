@@ -196,8 +196,8 @@ func (c *criService) toContainerdImage(ctx context.Context, image imagestore.Ima
 	if len(image.References) == 0 {
 		return nil, fmt.Errorf("invalid image with no reference %q", image.ID)
 	}
-	client := GetClientForRuntimeHandler(c, image.RuntimeHandler)
-	return client.GetImage(ctx, image.References[0])
+	//client := GetClientForRuntimeHandler(c, image.RuntimeHandler)
+	return c.client.GetImage(ctx, image.References[0])
 }
 
 // getUserFromImage gets uid or user name of the image user.
@@ -219,6 +219,7 @@ func getUserFromImage(user string) (*int64, string) {
 	return &uid, ""
 }
 
+/*
 func GetClientForRuntimeHandler(c *criService, runtimeHdlr string) *containerd.Client {
 	log.G(context.Background()).Debugf("!! GetClientForRuntimeHandler runtimehdlr %v", runtimeHdlr)
 	if runtimeHdlr == "" {
@@ -256,6 +257,7 @@ func GetClientForRuntimeHandler(c *criService, runtimeHdlr string) *containerd.C
 	}
 	return c.client
 }
+*/
 
 // ensureImageExists returns corresponding metadata of the image reference, if image is not
 // pulled yet, the function will pull the image.

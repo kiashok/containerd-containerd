@@ -40,8 +40,9 @@ import (
 	"github.com/containerd/containerd"
 	"github.com/containerd/containerd/errdefs"
 	containerdimages "github.com/containerd/containerd/images"
-	runhcsoptions "github.com/Microsoft/hcsshim/cmd/containerd-shim-runhcs-v1/options"
+	//runhcsoptions "github.com/Microsoft/hcsshim/cmd/containerd-shim-runhcs-v1/options"
 	"github.com/containerd/containerd/log"
+	"github.com/containerd/containerd/images"
 	"github.com/containerd/containerd/pkg/cri/annotations"
 	criconfig "github.com/containerd/containerd/pkg/cri/config"
 	crilabels "github.com/containerd/containerd/pkg/cri/labels"
@@ -171,7 +172,7 @@ func (c *criService) PullImage(ctx context.Context, r *runtime.PullImageRequest)
 		containerd.WithMaxConcurrentDownloads(c.config.MaxConcurrentDownloads),
 		containerd.WithImageHandler(imageHandler),
 		containerd.WithUnpackOpts([]containerd.UnpackOpt{
-			containerd.WithUnpackDuplicationSuppressor(c.unpackDuplicationSuppressor),
+		containerd.WithUnpackDuplicationSuppressor(c.unpackDuplicationSuppressor),
 		}),
 	}
 
@@ -200,36 +201,10 @@ func (c *criService) PullImage(ctx context.Context, r *runtime.PullImageRequest)
 	}
 	log.G(ctx).Debugf("!! criService.PullImage, runtimeHdlr %v",runtimeHdlr)
 
-	pullOpts = append(pullOpts, containerd.WithRuntimeHandlerForPull(runtimeHdlr))
+	pullOpts = append(pullOpts, containerd.WithPlatformMatcher(c.platformMap[runtimeHdlr]))
 
-	ociRuntime, ok := c.config.ContainerdConfig.Runtimes[runtimeHdlr] // read handler.Runtimes.OSVersion etc
-	log.G(ctx).Debugf("!!! criservice.PullImage() ok %v", ok)
-	if !ok {
-		log.G(ctx).Errorf("failed to get runtime %v", runtimeHdlr)
-		return nil, fmt.Errorf("no runtime for %q is configured", runtimeHdlr)
-	}
+	log.G(ctx).Debugf("!! criService.PullImage, before calling pull2, platformMatcher %v",c.platformMap[runtimeHdlr])
 
-	// get runtime options for windows pods and check if its process isolated or hyperV
-	if ociRuntime.Type == runtimeRunhcsV1 {
-		runtimeOpts, err := generateRuntimeOptions(ociRuntime, c.config)
-		if err != nil {
-			return nil, fmt.Errorf("failed to generate runtime options: %w", err)
-		}
-		rhcso, ok := runtimeOpts.(*runhcsoptions.Options)
-		if ok {
-			if rhcso.SandboxIsolation == 1 { // hyperV isolated
-				// we need to use the appropriate client using runtimeHdlr for this client.Pull() call
-				//image, err := c.clientMap[runtimeHdlr].Pull(pctx, ref, pullOpts...)
-				client = c.clientMap[runtimeHdlr]
-				// TODO: above line check for nil
-				// why not c.runtime below?
-				log.G(ctx).Debugf("!! criservice.PullImage() client %v, guestPlatform %v", client, ociRuntime.GuestPlatform)
-			}
-		}
-	}
-
-	log.G(ctx).Debugf("!! criService.PullImage, before calling pull2, client %v",client)
-//	log.G(ctx).Debugf("!!! criservice.PullImage() before generateRuntimeOptions %v", ociRuntime)
 	pullReporter.start(pctx)
 	image, err := client.Pull(pctx, ref, pullOpts...)
 	pcancel()
@@ -328,21 +303,23 @@ func (c *criService) createImageReference(ctx context.Context, name string, runt
 		Target: desc,
 		// Add a label to indicate that the image is managed by the cri plugin.
 		Labels: labels,
-		//RuntimeHandler: runtimeHandler,
 	}
-	//client := c.clientMap[runtimeHdlr]
-	client := GetClientForRuntimeHandler(c, runtimeHandler) // this needs to change to above
-	// TODO(random-liu): Figure out which is the more performant sequence create then update or
-	// update then create.
-	log.G(ctx).Debugf("!! createImageRef client is %v", client)
-	oldImg, err := client.ImageService().Create(ctx, img)
+
+	createOpts := []images.CreateOpt {
+		images.CreateWithRuntimeHandler(runtimeHandler),
+	}
+	oldImg, err := c.client.ImageService().Create(ctx, img, createOpts...)
 	if err == nil || !errdefs.IsAlreadyExists(err) {
 		return err
 	}
 	if oldImg.Target.Digest == img.Target.Digest && oldImg.Labels[crilabels.ImageLabelKey] == labels[crilabels.ImageLabelKey] {
 		return nil
 	}
-	_, err = client.ImageService().Update(ctx, img, "target", "labels."+crilabels.ImageLabelKey)
+	updateOpts := []images.UpdateOpt {
+		images.WithFieldPaths([]string{"target", fmt.Sprintf("labels.%s",crilabels.ImageLabelKey)}),
+	}
+
+	_, err = c.client.ImageService().Update(ctx, img, updateOpts...)
 	return err
 }
 
@@ -402,10 +379,13 @@ func (c *criService) updateImage(ctx context.Context, r string, runtimeHandler s
 		log.G(ctx).Debugf("!! criservice.updateImage() file: %v no %v", file, no)
 	}
 */
-	client := GetClientForRuntimeHandler(c, runtimeHandler)
-	log.G(ctx).Debugf("!! criservice.updateImage client returned is %v", client)
+	//client := GetClientForRuntimeHandler(c, runtimeHandler)
+	//log.G(ctx).Debugf("!! criservice.updateImage client returned is %v", client)
 	//img, err := c.client.GetImage(ctx, r)
-	img, err := client.GetImage(ctx, r)
+
+	log.G(ctx).Debugf("!! criservice.updateImage runtimeHandler got is %v", runtimeHandler)
+
+	img, err := c.client.GetImage(ctx, r)
 	log.G(ctx).Debugf("!! criservice.updateImage client.GetImage() returned %v", img)
 	if err != nil && !errdefs.IsNotFound(err) {
 		return fmt.Errorf("get image by reference: %w", err)

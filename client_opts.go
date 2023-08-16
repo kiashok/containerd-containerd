@@ -33,7 +33,7 @@ type clientOpts struct {
 	defaultRuntime  string
 	guestPlatform   ocispec.Platform
 	defaultPlatform platforms.MatchComparer
-	runtimeHandler string
+//	runtimeHandler string
 	services        *services
 	dialOptions     []grpc.DialOption
 	callOptions     []grpc.CallOption
@@ -53,14 +53,14 @@ func WithDefaultNamespace(ns string) ClientOpt {
 		return nil
 	}
 }
-
+/*
 func WithRuntimeHandler(runtimeHandler string) ClientOpt{
 	return func(c *clientOpts) error {
 		c.runtimeHandler = runtimeHandler
 		return nil
 	}
 }
-
+*/
 // WithDefaultRuntime sets the default runtime on the client
 func WithDefaultRuntime(rt string) ClientOpt {
 	return func(c *clientOpts) error {
@@ -69,12 +69,14 @@ func WithDefaultRuntime(rt string) ClientOpt {
 	}
 }
 
+/*
 func WithGuestPlatform(guestPlatform ocispec.Platform) ClientOpt {
 	return func(c *clientOpts) error {
 		c.guestPlatform = guestPlatform
 		return nil
 	}
 } 
+*/
 
 // WithDefaultPlatform sets the default platform matcher on the client
 func WithDefaultPlatform(platform platforms.MatchComparer) ClientOpt {
@@ -175,6 +177,7 @@ func WithPullSnapshotter(snapshotterName string, opts ...snapshots.Opt) RemoteOp
 	}
 }
 
+/*
 // WithRuntimeHandler specifies runtime handler to pull image
 func WithRuntimeHandlerForPull(runtimeHandler string, opts ...snapshots.Opt) RemoteOpt {
 	return func(_ *Client, c *RemoteContext) error {
@@ -182,6 +185,7 @@ func WithRuntimeHandlerForPull(runtimeHandler string, opts ...snapshots.Opt) Rem
 		return nil
 	}
 }
+*/
 
 // WithPullLabel sets a label to be associated with a pulled reference
 func WithPullLabel(key, value string) RemoteOpt {

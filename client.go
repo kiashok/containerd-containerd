@@ -46,7 +46,7 @@ import (
 	contentproxy "github.com/containerd/containerd/content/proxy"
 	"github.com/containerd/containerd/defaults"
 	"github.com/containerd/containerd/errdefs"
-	"github.com/containerd/containerd/log"
+	//"github.com/containerd/containerd/log"
 	"github.com/containerd/containerd/events"
 	"github.com/containerd/containerd/images"
 	"github.com/containerd/containerd/leases"
@@ -106,43 +106,12 @@ func New(address string, opts ...ClientOpt) (*Client, error) {
 		c.runtime = defaults.DefaultRuntime
 	}
 
-
-	if copts.runtimeHandler != "" {
-		c.runtimeHandler = copts.runtimeHandler
-	} else {
-		c.runtimeHandler = ""
-	}
-
-	log.G(context.Background()).Debugf("!! ctrd.New copts.defaultplatform %v", c.platform)
 	if copts.defaultPlatform != nil {
 		c.platform = copts.defaultPlatform
 	} else {
 		c.platform = platforms.Default()
 	}
-	log.G(context.Background()).Debugf("!! ctrd.New c.platform %v before guestPlatform check", c.platform)
 
-	// copts.guestPlatform is set only while creating clientMap. See cri.go
-	//if copts.guestPlatform != ocispec.Platform{} {
-		/*
-		imagePlatform := ocispec.Platform {
-			Architecture: "",
-            OS: "",
-            OSFeatures: []string{},
-            OSVersion: "",
-            Variant: "",
-		}
-		*/
-	//imagePlatform := ocispec.Platform{}
-	log.G(context.Background()).Debugf("!! ctrd.New copts.guestPlatform %v", copts.guestPlatform)
-	//log.G(context.Background()).Debugf("!! ctrd.New imagePlatform %v", imagePlatform)
-		// this check is not working when its null
-	//if !reflect.DeepEqual(copts.guestPlatform, imagePlatform) {
-	if copts.guestPlatform.OSVersion != "" {
-		log.G(context.Background()).Debugf("!! ctrd.New() guesPlatform.OSVersion != nil %v", copts.guestPlatform.OSVersion)
-		c.platform = platforms.Only(copts.guestPlatform)	
-	}
-
-	log.G(context.Background()).Debugf("!! ctrd.New final c.platform %v", c.platform)
 	if copts.services != nil {
 		c.services = *copts.services
 	}
@@ -249,7 +218,7 @@ type Client struct {
 	connMu    sync.Mutex
 	conn      *grpc.ClientConn
 	runtime   string
-	runtimeHandler string
+	//runtimeHandler string
 	defaultns string
 	platform  platforms.MatchComparer
 	connector func() (*grpc.ClientConn, error)
@@ -369,7 +338,7 @@ type RemoteContext struct {
 	// Snapshotter used for unpacking
 	Snapshotter string
 
-	RuntimeHandler string
+	//RuntimeHandler string
 	// SnapshotterOpts are additional options to be passed to a snapshotter during pull
 	SnapshotterOpts []snapshots.Opt
 
@@ -690,7 +659,7 @@ func (c *Client) ImageService() images.Store {
 	}
 	c.connMu.Lock()
 	defer c.connMu.Unlock()
-	return NewImageStoreFromClient(imagesapi.NewImagesClient(c.conn), c.runtimeHandler)
+	return NewImageStoreFromClient(imagesapi.NewImagesClient(c.conn))
 }
 
 // DiffService returns the underlying Differ

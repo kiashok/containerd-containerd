@@ -37,17 +37,18 @@ import (
 	criconfig "github.com/containerd/containerd/pkg/cri/config"
 	"github.com/containerd/containerd/pkg/cri/constants"
 	"github.com/containerd/containerd/pkg/cri/server"
-	"github.com/pelletier/go-toml"
-	runcoptions "github.com/containerd/containerd/runtime/v2/runc/options"
-	runtimeoptions "github.com/containerd/containerd/pkg/runtimeoptions/v1"
-	runhcsoptions "github.com/Microsoft/hcsshim/cmd/containerd-shim-runhcs-v1/options"
+//	"github.com/pelletier/go-toml"
+//	runcoptions "github.com/containerd/containerd/runtime/v2/runc/options"
+//	runtimeoptions "github.com/containerd/containerd/pkg/runtimeoptions/v1"
+//	runhcsoptions "github.com/Microsoft/hcsshim/cmd/containerd-shim-runhcs-v1/options"
 //	runtimeoptions "github.com/containerd/containerd/pkg/runtimeoptions/v1"
 )
 
-const (
+//const (
 		// runtimeRunhcsV1 is the runtime type for runhcs.
-		runtimeRunhcsV1 = "io.containerd.runhcs.v1"
-)
+//		runtimeRunhcsV1 = "io.containerd.runhcs.v1"
+//)
+
 // Register CRI service plugin
 func init() {
 	config := criconfig.DefaultConfig()
@@ -64,6 +65,7 @@ func init() {
 	})
 }
 
+/*
 func generateRuntimeOptions(r criconfig.Runtime, c criconfig.Config) (interface{}, error) {
 	if r.Options == nil {
 		return nil, nil
@@ -88,7 +90,8 @@ func generateRuntimeOptions(r criconfig.Runtime, c criconfig.Config) (interface{
 
 	return options, nil
 }
-
+*/
+/*
 // getRuntimeOptionsType gets empty runtime options by the runtime type name.
 func getRuntimeOptionsType(t string) interface{} {
 	switch t {
@@ -100,6 +103,7 @@ func getRuntimeOptionsType(t string) interface{} {
 		return &runtimeoptions.Options{}
 	}
 }
+*/
 
 func initCRIService(ic *plugin.InitContext) (interface{}, error) {
 	ready := ic.RegisterReadiness()
@@ -125,7 +129,7 @@ func initCRIService(ic *plugin.InitContext) (interface{}, error) {
 	}
 
 	log.G(ctx).Info("Connect containerd service")
-	
+	/*
 	imagePlatform := imagespec.Platform {
 		Architecture: "",
 		OS: "",
@@ -135,12 +139,13 @@ func initCRIService(ic *plugin.InitContext) (interface{}, error) {
 	}
 	//imagePlatform := imagespec.Platform{}
 	ic.Meta.RuntimeHandler = c.PluginConfig.ContainerdConfig.DefaultRuntimeName
+	*/
 	client, err := containerd.New(
 		"",
 		containerd.WithDefaultNamespace(constants.K8sContainerdNamespace),
 		containerd.WithDefaultPlatform(platforms.Default()),
-		containerd.WithGuestPlatform(imagePlatform),
-		containerd.WithRuntimeHandler(c.PluginConfig.ContainerdConfig.DefaultRuntimeName),
+//		containerd.WithGuestPlatform(imagePlatform),
+	//	containerd.WithRuntimeHandler(c.PluginConfig.ContainerdConfig.DefaultRuntimeName),
 	// NOTE: purposely not setting runtime handler here as it is the default client created. We need to use
 	// client in the map for image pull purposes
 		//containerd.WithRuntimeHandler(k),
@@ -151,19 +156,26 @@ func initCRIService(ic *plugin.InitContext) (interface{}, error) {
 	}
 
 	log.G(ctx).Debugf("!! InitCriService , default original client %v", client)
+	platformMap := make(map[string]platforms.MatchComparer)
+	for k, r := range c.PluginConfig.ContainerdConfig.Runtimes {
+		log.G(context.Background()).Debugf("!! InitCriService k: %v", k)
+		log.G(context.Background()).Debugf("!! InitCriService r.GuestPlatform: %v", r.GuestPlatform)
+
+		if r.GuestPlatform.OS != "" && r.GuestPlatform.OSVersion != "" {
+			//platformMap[k] = platforms.OnlyWithRuntimeHdlr(copts.guestPlatform, k)
+			platformMap[k] = platforms.Only(r.GuestPlatform) // may have to pass runtime handler and set it in platform matcher so the key can be changed in cri's image map
+		} else {
+			//platformMap[k] = platforms.OnlyWithRuntimeHdlr(platforms.Default(), k)
+			platformMap[k] = platforms.Only(platforms.DefaultSpec())
+		}
+	}
+	/*
 	clientMap := make(map[string]*containerd.Client)
 	for k, r := range c.PluginConfig.ContainerdConfig.Runtimes {
 		//guestPlatform := imagespec.Platform{}
 		log.G(context.Background()).Debugf("!! InitCriService k: %v", k)
 		log.G(context.Background()).Debugf("!! InitCriService r.GuestPlatform: %v", r.GuestPlatform)
-	
-/*		
-		if !reflect.DeepEqual(r.GuestPlatform, imagePlatform) {
-			log.G(context.Background()).Debugf("!! InitCriService !empty r.GuestPlatform %v, imagePlatform %v", r.GuestPlatform, imagePlatform)
-			guestPlatform = r.GuestPlatform
-			ic.Meta.Platforms = []imagespec.Platform{guestPlatform}
-		} 
-*/
+
 		ic.Meta.RuntimeHandler = k
 
 		// test 
@@ -209,30 +221,18 @@ func initCRIService(ic *plugin.InitContext) (interface{}, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to create containerd clientMap: %w", err)
 		}
-//		if err != nil {
-//			return nil, fmt.Errorf("failed to create containerd client: %w", err)
-//		}
-
-		// should this be done only for windows OS runtimes?!
-		//clientMap[k] = append(clientMap[k], WithDefaultRuntime(k))
-		/*
-		if r.HostPlatform != nil {
-		   clientMap[k] = append(clientMap[k], containerd.WithDefaultPlatform(platformMatcher))
-		} else {
-			clientMap[k] = append(clientMap[k], containerd.WithDefaultPlatform(platforms.Default()))
-		}
-		*/
 		//all callers of criservice.client.func/Pull() etc needs to change to
 	//	criservice.client[runtime].func() ??
 	}
-
+*/
 	var s server.CRIService
 	if os.Getenv("ENABLE_CRI_SANDBOXES") != "" {
 		log.G(ctx).Info("using experimental CRI Sandbox server - unset ENABLE_CRI_SANDBOXES to disable")
 		s, err = sbserver.NewCRIService(c, client, getNRIAPI(ic))
 	} else {
 		log.G(ctx).Debug("using legacy CRI server")
-		s, err = server.NewCRIService(c, client, clientMap, getNRIAPI(ic))
+//		s, err = server.NewCRIService(c, client, clientMap, getNRIAPI(ic))
+s, err = server.NewCRIService(c, client, platformMap, getNRIAPI(ic))
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to create CRI service: %w", err)

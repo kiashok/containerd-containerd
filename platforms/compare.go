@@ -98,6 +98,10 @@ func Only(platform specs.Platform) MatchComparer {
 	return Ordered(platformVector(Normalize(platform))...)
 }
 
+//func OnlyWithRuntimeHdlr() MatchComparer {
+
+//}
+
 // OnlyStrict returns a match comparer for a single platform.
 //
 // Unlike Only, OnlyStrict does not match sub platforms.
