@@ -46,6 +46,12 @@ var malformedHTTPHeaders = map[string]struct{}{
 	"connection": {},
 }
 
+// malformedHTTPHeaders lists the headers that the gRPC server may reject outright as malformed.
+// See https://github.com/grpc/grpc-go/pull/4803#issuecomment-986093310 for more context.
+var malformedHTTPHeaders = map[string]struct{}{
+	"connection": {},
+}
+
 type (
 	rpcMethodKey       struct{}
 	httpPathPatternKey struct{}
