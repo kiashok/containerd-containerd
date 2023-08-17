@@ -49,8 +49,6 @@ type Image struct {
 	ImageSpec imagespec.Image
 	// Pinned image to prevent it from garbage collection
 	Pinned bool
-	// matchcomparer for each runtime class. For more info, see CriService struct
-	platformMatcherMap map[string]platforms.MatchComparer
 }
 
 // Store stores all images.
@@ -60,15 +58,18 @@ type Store struct {
 	refCache map[string]string
 	// client is the containerd client.
 	client *containerd.Client
+	// matchcomparer for each runtime class. For more info, see CriService struct
+	platformMatcherMap map[string]platforms.MatchComparer
 	// store is the internal image store indexed by image id.
 	store *store
 }
 
 // NewStore creates an image store.
-func NewStore(client *containerd.Client) *Store {
+func NewStore(client *containerd.Client, platformMatcherMap map[string]platforms.MatchComparer) *Store {
 	return &Store{
 		refCache: make(map[string]string),
 		client:   client,
+		platformMatcherMap: platformMatcherMap,
 		store: &store{
 			images:    make(map[string]Image),
 			digestSet: digestset.NewSet(),

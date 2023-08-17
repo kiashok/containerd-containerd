@@ -156,7 +156,11 @@ func (l *local) Update(ctx context.Context, req *imagesapi.UpdateImageRequest, _
 		ctx = epoch.WithSourceDateEpoch(ctx, &tm)
 	}
 
-	updated, err := l.store.Update(ctx, image, fieldpaths...)
+	updateOpts := []images.UpdateOpt {
+		images.UpdateWithFieldpaths(fieldpaths),
+	}
+
+	updated, err := l.store.Update(ctx, image, updateOpts...)
 	if err != nil {
 		return nil, errdefs.ToGRPC(err)
 	}
