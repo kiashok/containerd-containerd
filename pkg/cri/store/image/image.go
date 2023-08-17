@@ -26,6 +26,7 @@ import (
 	"github.com/containerd/containerd/errdefs"
 	"github.com/containerd/containerd/images"
 	"github.com/containerd/containerd/images/usage"
+	"github.com/containerd/containerd/platforms"
 	"github.com/containerd/containerd/pkg/cri/labels"
 	"github.com/containerd/containerd/pkg/cri/util"
 	"github.com/containerd/containerd/platforms"
@@ -38,11 +39,15 @@ import (
 	imagespec "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
+const imageKeyFormat = "%s-%s"
+
 // Image contains all resources associated with the image. All fields
 // MUST not be mutated directly after created.
 type Image struct {
 	// Id of the image. Normally the digest of image config.
 	ID string
+	// runtime handler used to pull this image.
+	RuntimeHandler string
 	// References are references to the image, e.g. RepoTag and RepoDigest.
 	References []string
 	// ChainID is the chainID of the image.
@@ -53,6 +58,8 @@ type Image struct {
 	ImageSpec imagespec.Image
 	// Pinned image to prevent it from garbage collection
 	Pinned bool
+	// matchcomparer for each runtime class. For more info, see CriService struct
+	platformMatcherMap map[string]platforms.MatchComparer
 }
 
 // InfoProvider provides both content and info about content
@@ -66,7 +73,6 @@ type Store struct {
 	lock sync.RWMutex
 	// refCache is a containerd image reference to image id cache.
 	refCache map[string]string
-
 	// images is the local image store
 	images images.Store
 
@@ -77,17 +83,21 @@ type Store struct {
 	// TODO: Make this store multi-platform
 	platform platforms.MatchComparer
 
+	// matchcomparer for each runtime class. For more info, see CriService struct
+	platformMatcherMap map[string]platforms.MatchComparer
+
 	// store is the internal image store indexed by image id.
 	store *store
 }
 
 // NewStore creates an image store.
-func NewStore(img images.Store, provider InfoProvider, platform platforms.MatchComparer) *Store {
+func NewStore(img images.Store, provider InfoProvider, platform platforms.MatchComparer, platformMatcherMap map[string]platforms.MatchComparer) *Store {
 	return &Store{
 		refCache: make(map[string]string),
 		images:   img,
 		provider: provider,
 		platform: platform,
+		platformMatcherMap: platformMatcherMap,
 		store: &store{
 			images:    make(map[string]Image),
 			digestSet: digestset.NewSet(),
@@ -96,18 +106,21 @@ func NewStore(img images.Store, provider InfoProvider, platform platforms.MatchC
 }
 
 // Update updates cache for a reference.
-func (s *Store) Update(ctx context.Context, ref string) error {
+func (s *Store) Update(ctx context.Context, ref string, runtimeHandler string) error { //TODO: pass runtimeHandler and make this a compulsory field eventually
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
-	i, err := s.images.Get(ctx, ref)
+	getImageOpts := []containerd.GetImageOpt{
+		containerd.GetImageWithPlatformMatcher(s.platformMatcherMap[runtimeHandler]),
+	}
+	i, err := s.images.Get(ctx, ref, getImageOpts...)
 	if err != nil && !errdefs.IsNotFound(err) {
 		return fmt.Errorf("get image from containerd: %w", err)
 	}
 
 	var img *Image
 	if err == nil {
-		img, err = s.getImage(ctx, i)
+		img, err = s.getImage(ctx, i, runtimeHandler)
 		if err != nil {
 			return fmt.Errorf("get image info from containerd: %w", err)
 		}
@@ -141,7 +154,7 @@ func (s *Store) update(ref string, img *Image) error {
 }
 
 // getImage gets image information from containerd for current platform.
-func (s *Store) getImage(ctx context.Context, i images.Image) (*Image, error) {
+func (s *Store) getImage(ctx context.Context, i images.Image, runtimeHandler string) (*Image, error) {
 	diffIDs, err := i.RootFS(ctx, s.provider, s.platform)
 	if err != nil {
 		return nil, fmt.Errorf("get image diffIDs: %w", err)
@@ -174,6 +187,7 @@ func (s *Store) getImage(ctx context.Context, i images.Image) (*Image, error) {
 	return &Image{
 		ID:         id,
 		References: []string{i.Name},
+		RuntimeHandler: runtimeHandler,
 		ChainID:    chainID.String(),
 		Size:       size,
 		ImageSpec:  spec,

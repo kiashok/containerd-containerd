@@ -18,7 +18,7 @@ package containerd
 
 import (
 	"context"
-
+	
 	imagesapi "github.com/containerd/containerd/api/services/images/v1"
 	"github.com/containerd/containerd/errdefs"
 	"github.com/containerd/containerd/images"
@@ -40,6 +40,7 @@ func NewImageStoreFromClient(client imagesapi.ImagesClient) images.Store {
 	}
 }
 
+// TODO: does this need GetImageOpt too??
 func (s *remoteImages) Get(ctx context.Context, name string) (images.Image, error) {
 	resp, err := s.client.Get(ctx, &imagesapi.GetImageRequest{
 		Name: name,
@@ -62,9 +63,18 @@ func (s *remoteImages) List(ctx context.Context, filters ...string) ([]images.Im
 	return imagesFromProto(resp.Images), nil
 }
 
-func (s *remoteImages) Create(ctx context.Context, image images.Image) (images.Image, error) {
+func (s *remoteImages) Create(ctx context.Context, image images.Image, opts ...images.CreateOpt) (images.Image, error) {
+	var createOpts images.CreateOptions
+	for _, o := range opts {
+		if err := o(ctx, &createOpts); err != nil {
+			return images.Image{}, err
+		}
+	}
+
 	req := &imagesapi.CreateImageRequest{
 		Image: imageToProto(&image),
+		// TODO:
+		RuntimeHandler: createOpts.RuntimeHandler,
 	}
 	if tm := epoch.FromContext(ctx); tm != nil {
 		req.SourceDateEpoch = timestamppb.New(*tm)
@@ -77,16 +87,24 @@ func (s *remoteImages) Create(ctx context.Context, image images.Image) (images.I
 	return imageFromProto(created.Image), nil
 }
 
-func (s *remoteImages) Update(ctx context.Context, image images.Image, fieldpaths ...string) (images.Image, error) {
+func (s *remoteImages) Update(ctx context.Context, image images.Image, opts ...images.UpdateOpt) (images.Image, error) {
+	var updateOpts images.UpdateOptions
+	for _, o := range opts {
+		if err := o(ctx, &updateOpts); err != nil {
+			return images.Image{}, err
+		}
+	}
+
 	var updateMask *ptypes.FieldMask
-	if len(fieldpaths) > 0 {
+	if len(updateOpts.Fieldpaths) > 0 {
 		updateMask = &ptypes.FieldMask{
-			Paths: fieldpaths,
+			Paths: updateOpts.Fieldpaths,
 		}
 	}
 	req := &imagesapi.UpdateImageRequest{
 		Image:      imageToProto(&image),
 		UpdateMask: updateMask,
+		// TODO: add runtimeHandler string
 	}
 	if tm := epoch.FromContext(ctx); tm != nil {
 		req.SourceDateEpoch = timestamppb.New(*tm)

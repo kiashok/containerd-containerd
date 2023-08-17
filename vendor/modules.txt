@@ -822,8 +822,5 @@ sigs.k8s.io/structured-merge-diff/v4/value
 # sigs.k8s.io/yaml v1.3.0
 ## explicit; go 1.12
 sigs.k8s.io/yaml
-<<<<<<< HEAD
-=======
 # github.com/AdaLogics/go-fuzz-headers => github.com/AdamKorcz/go-fuzz-headers-1 v0.0.0-20230111232327-1f10f66a31bf
 # k8s.io/cri-api => ../../../k8s.io/kubernetes/staging/src/k8s.io/cri-api/
->>>>>>> 4ccef5a54... Update cri-api to local cri changes

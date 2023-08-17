@@ -350,14 +350,14 @@ func (em *eventMonitor) handleEvent(any interface{}) error {
 			return fmt.Errorf("failed to update container status for TaskOOM event: %w", err)
 		}
 	case *eventtypes.ImageCreate:
-		log.G(ctx).Infof("ImageCreate event %+v", e)
-		return em.c.updateImage(ctx, e.Name)
+		logrus.Infof("ImageCreate event %+v", e)
+		return em.c.updateImage(ctx, e.Name, e.RuntimeHandler)
 	case *eventtypes.ImageUpdate:
-		log.G(ctx).Infof("ImageUpdate event %+v", e)
-		return em.c.updateImage(ctx, e.Name)
+		logrus.Infof("ImageUpdate event %+v", e)
+		return em.c.updateImage(ctx, e.Name, e.RuntimeHandler)
 	case *eventtypes.ImageDelete:
-		log.G(ctx).Infof("ImageDelete event %+v", e)
-		return em.c.updateImage(ctx, e.Name)
+		logrus.Infof("ImageDelete event %+v", e)
+		return em.c.updateImage(ctx, e.Name, "")
 	}
 
 	return nil
