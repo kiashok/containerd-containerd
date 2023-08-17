@@ -334,7 +334,7 @@ func (c *criService) getLabels(ctx context.Context, name string) map[string]stri
 // generates necessary metadata for the image and make it managed.
 func (c *criService) updateImage(ctx context.Context, r string, runtimeHandler string) error {
 	if runtimeHandler == "" {
-		runtimeHdlr = c.config.ContainerdConfig.DefaultRuntimeName
+		runtimeHandler = c.config.ContainerdConfig.DefaultRuntimeName
 	}
 	getImageOpts := []containerd.GetImageOpt {
 		containerd.GetImageWithPlatformMatcher(c.platformMatcherMap[runtimeHandler]),
