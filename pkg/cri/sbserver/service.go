@@ -109,7 +109,7 @@ type criService struct {
 	netPlugin map[string]cni.CNI
 	// client is an instance of the containerd client
 	client *containerd.Client
-	platformMatchComparer map[string]platforms.MatchComparer
+	platformMatcherMap map[string]platforms.MatchComparer
 	// streamServer is the streaming server serves container streaming request.
 	streamServer streaming.Server
 	// eventMonitor is the monitor monitors containerd events.
@@ -154,7 +154,7 @@ func NewCRIService(config criconfig.Config, client *containerd.Client, platformM
 		imageService:       imageService,
 		config:             config,
 		client:             client,
-		platformMatchComparer: platformMap,
+		platformMatcherMap: platformMap,
 		imageFSPath:        imageFSPath,
 		os:                 osinterface.RealOS{},
 		sandboxStore:       sandboxstore.NewStore(labels),
@@ -204,7 +204,7 @@ func NewCRIService(config criconfig.Config, client *containerd.Client, platformM
 	}
 
 	// Load all sandbox controllers(pod sandbox controller and remote shim controller)
-	c.sandboxControllers[criconfig.ModePodSandbox] = podsandbox.New(config, client, c.sandboxStore, c.os, c, imageService, c.baseOCISpecs)
+	c.sandboxControllers[criconfig.ModePodSandbox] = podsandbox.New(config, client, c.sandboxStore, c.os, c, imageService, c.baseOCISpecs, platformMap)
 	c.sandboxControllers[criconfig.ModeShim] = client.SandboxController()
 
 	c.nri = nri

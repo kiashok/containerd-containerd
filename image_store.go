@@ -76,7 +76,7 @@ func (s *remoteImages) Create(ctx context.Context, image images.Image, opts ...i
 	req := &imagesapi.CreateImageRequest{
 		Image: imageToProto(&image),
 		// TODO:
-		//RuntimeHandler: createOpts.RuntimeHandler,
+		RuntimeHandler: createOpts.RuntimeHandler,
 	}
 	if tm := epoch.FromContext(ctx); tm != nil {
 		req.SourceDateEpoch = timestamppb.New(*tm)

@@ -221,7 +221,7 @@ func (c *criService) PullImage(ctx context.Context, r *runtime.PullImageRequest)
 		// Update image store to reflect the newest state in containerd.
 		// No need to use `updateImage`, because the image reference must
 		// have been managed by the cri plugin.
-		if err := c.imageStore.Update(ctx, r); err != nil {
+		if err := c.imageStore.Update(ctx, r, runtimeHdlr); err != nil {
 			return nil, fmt.Errorf("failed to update image store %q: %w", r, err)
 		}
 	}
@@ -293,6 +293,8 @@ func (c *criService) createImageReference(ctx context.Context, name string, runt
 	}
 	// TODO(random-liu): Figure out which is the more performant sequence create then update or
 	// update then create.
+	// TODO or check if runtimeHandler is empty? Maybe you should fill it up with the default runtime handler?
+	log.G(ctx).Debugf("!! criService.createImageReference runtimeHandler is %v", runtimeHandler)
 	createOpts := []images.CreateOpt {
 		images.CreateWithRuntimeHandler(runtimeHandler),
 	}
@@ -335,6 +337,7 @@ func (c *criService) getLabels(ctx context.Context, name string) map[string]stri
 func (c *criService) updateImage(ctx context.Context, r string, runtimeHandler string) error {
 	if runtimeHandler == "" {
 		runtimeHandler = c.config.ContainerdConfig.DefaultRuntimeName
+		log.G(ctx).Debugf("!!criService.updateImage runtimeHandler was empty, so setting to %v", runtimeHandler)
 	}
 	getImageOpts := []containerd.GetImageOpt {
 		containerd.GetImageWithPlatformMatcher(c.platformMatcherMap[runtimeHandler]),
@@ -357,7 +360,7 @@ func (c *criService) updateImage(ctx context.Context, r string, runtimeHandler s
 		if err := c.createImageReference(ctx, id, runtimeHandler, img.Target(), labels); err != nil {
 			return fmt.Errorf("create image id reference %q: %w", id, err)
 		}
-		if err := c.imageStore.Update(ctx, id); err != nil {
+		if err := c.imageStore.Update(ctx, id, runtimeHandler); err != nil {
 			return fmt.Errorf("update image store for %q: %w", id, err)
 		}
 		// The image id is ready, add the label to mark the image as managed.
@@ -367,7 +370,7 @@ func (c *criService) updateImage(ctx context.Context, r string, runtimeHandler s
 	}
 	// If the image is not found, we should continue updating the cache,
 	// so that the image can be removed from the cache.
-	if err := c.imageStore.Update(ctx, r); err != nil {
+	if err := c.imageStore.Update(ctx, r, runtimeHandler); err != nil {
 		return fmt.Errorf("update image store for %q: %w", r, err)
 	}
 	return nil
