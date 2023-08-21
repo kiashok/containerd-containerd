@@ -22,7 +22,8 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/containerd/containerd/content"
+	"github.com/containerd/containerd"
+	"github.com/containerd/containerd/log"
 	"github.com/containerd/containerd/errdefs"
 	"github.com/containerd/containerd/images"
 	"github.com/containerd/containerd/images/usage"
@@ -39,6 +40,7 @@ import (
 	imagespec "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
+// name-runtimehandler
 const imageKeyFormat = "%s-%s"
 
 // Image contains all resources associated with the image. All fields
@@ -110,6 +112,7 @@ func (s *Store) Update(ctx context.Context, ref string, runtimeHandler string) e
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
+	log.G(ctx).Debugf("pkg.cri.store Update(), ref is %v", ref)
 	getImageOpts := []containerd.GetImageOpt{
 		containerd.GetImageWithPlatformMatcher(s.platformMatcherMap[runtimeHandler]),
 	}
@@ -131,12 +134,13 @@ func (s *Store) Update(ctx context.Context, ref string, runtimeHandler string) e
 // update updates the internal cache. img == nil means that
 // the image does not exist in containerd.
 func (s *Store) update(ref string, img *Image) error {
+	//key := fmt.Sprintf(imageKeyFormat, ref, runtimeHandler)
 	oldID, oldExist := s.refCache[ref]
 	if img == nil {
 		// The image reference doesn't exist in containerd.
 		if oldExist {
 			// Remove the reference from the store.
-			s.store.delete(oldID, ref)
+			s.store.delete(oldID, ref, img.RuntimeHandler)
 			delete(s.refCache, ref)
 		}
 		return nil
@@ -146,7 +150,7 @@ func (s *Store) update(ref string, img *Image) error {
 			return nil
 		}
 		// Updated. Remove tag from old image.
-		s.store.delete(oldID, ref)
+		s.store.delete(oldID, ref, img.RuntimeHandler)
 	}
 	// New image. Add new image.
 	s.refCache[ref] = img.ID
@@ -210,8 +214,8 @@ func (s *Store) Resolve(ref string) (string, error) {
 // Get gets image metadata by image id. The id can be truncated.
 // Returns various validation errors if the image id is invalid.
 // Returns errdefs.ErrNotFound if the image doesn't exist.
-func (s *Store) Get(id string) (Image, error) {
-	return s.store.get(id)
+func (s *Store) Get(id, runtimeHandler string) (Image, error) {
+	return s.store.get(id, runtimeHandler)
 }
 
 // List lists all images.
@@ -247,20 +251,21 @@ func (s *store) add(img Image) error {
 		}
 	}
 
-	i, ok := s.images[img.ID]
+	key := fmt.Sprintf(imageKeyFormat, img.ID, img.RuntimeHandler)
+	i, ok := s.images[key]
 	if !ok {
 		// If the image doesn't exist, add it.
-		s.images[img.ID] = img
+		s.images[key] = img
 		return nil
 	}
 	// Or else, merge and sort the references.
 	i.References = docker.Sort(util.MergeStringSlices(i.References, img.References))
 	i.Pinned = i.Pinned || img.Pinned
-	s.images[img.ID] = i
+	s.images[key] = i
 	return nil
 }
 
-func (s *store) get(id string) (Image, error) {
+func (s *store) get(id, runtimeHandler string) (Image, error) {
 	s.lock.RLock()
 	defer s.lock.RUnlock()
 	digest, err := s.digestSet.Lookup(id)
@@ -270,13 +275,15 @@ func (s *store) get(id string) (Image, error) {
 		}
 		return Image{}, err
 	}
-	if i, ok := s.images[digest.String()]; ok {
+
+	key := fmt.Sprintf(imageKeyFormat, digest.String(), runtimeHandler)
+	if i, ok := s.images[key]; ok {
 		return i, nil
 	}
 	return Image{}, errdefs.ErrNotFound
 }
 
-func (s *store) delete(id, ref string) {
+func (s *store) delete(id, ref, runtimeHandler string) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	digest, err := s.digestSet.Lookup(id)
@@ -285,16 +292,18 @@ func (s *store) delete(id, ref string) {
 		// So we need to return if there are error.
 		return
 	}
-	i, ok := s.images[digest.String()]
+
+	key := fmt.Sprintf(imageKeyFormat, digest.String(), runtimeHandler)
+	i, ok := s.images[key]
 	if !ok {
 		return
 	}
 	i.References = util.SubtractStringSlice(i.References, ref)
 	if len(i.References) != 0 {
-		s.images[digest.String()] = i
+		s.images[key] = i
 		return
 	}
 	// Remove the image if it is not referenced any more.
 	s.digestSet.Remove(digest)
-	delete(s.images, digest.String())
+	delete(s.images, key)
 }
