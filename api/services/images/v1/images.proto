@@ -109,6 +109,7 @@ message UpdateImageRequest {
 	google.protobuf.FieldMask update_mask = 2;
 
 	google.protobuf.Timestamp source_date_epoch = 3;
+	string runtimeHandler = 4;
 }
 
 message UpdateImageResponse {
@@ -141,10 +142,11 @@ message DeleteImageRequest {
 	//
 	// Default is false
 	bool sync = 2;
-
 	// Target value for image to be deleted
 	//
 	// If image descriptor does not match the same digest,
 	// the delete operation will return "not found" error.
 	optional containerd.types.Descriptor target = 3;
+	// runtimeHandler of the image to be deleted
+	string runtimeHandler = 4;
 }
