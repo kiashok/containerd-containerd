@@ -361,6 +361,7 @@ func (c *criService) updateImage(ctx context.Context, r string, runtimeHandler s
 		if err := c.createImageReference(ctx, id, runtimeHandler, img.Target(), labels); err != nil {
 			return fmt.Errorf("create image id reference %q: %w", id, err)
 		}
+		log.G(ctx).Debugf("!! criservice.UpdateImage(), before calling pkg/cri/store")
 		if err := c.imageStore.Update(ctx, id, runtimeHandler); err != nil {
 			return fmt.Errorf("update image store for %q: %w", id, err)
 		}
