@@ -58,7 +58,10 @@ func (c *criService) RemoveImage(ctx context.Context, r *runtime.RemoveImageRequ
 			// Delete the last image reference synchronously to trigger garbage collection.
 			// This is best effort. It is possible that the image reference is deleted by
 			// someone else before this point.
-			opts = []images.DeleteOpt{images.SynchronousDelete()}
+			opts = []images.DeleteOpt{
+				images.SynchronousDelete(),
+				images.DeleteWithRuntimeHandler(runtimeHdlr),	
+			}
 		}
 		err = c.client.ImageService().Delete(ctx, ref, opts...)
 		if err == nil || errdefs.IsNotFound(err) {

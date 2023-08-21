@@ -107,6 +107,7 @@ func (s *remoteImages) Update(ctx context.Context, image images.Image, opts ...i
 		Image:      imageToProto(&image),
 		UpdateMask: updateMask,
 		// TODO: add runtimeHandler string
+		RuntimeHandler: updateOpts.RuntimeHandler,
 	}
 	if tm := epoch.FromContext(ctx); tm != nil {
 		req.SourceDateEpoch = timestamppb.New(*tm)
@@ -129,6 +130,7 @@ func (s *remoteImages) Delete(ctx context.Context, name string, opts ...images.D
 	_, err := s.client.Delete(ctx, &imagesapi.DeleteImageRequest{
 		Name: name,
 		Sync: do.Synchronous,
+		RuntimeHandler: do.RuntimeHandler,
 	})
 
 	return errdefs.FromGRPC(err)

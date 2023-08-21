@@ -357,7 +357,7 @@ func (em *eventMonitor) handleEvent(any interface{}) error {
 		return em.c.updateImage(ctx, e.Name, e.RuntimeHandler)
 	case *eventtypes.ImageDelete:
 		logrus.Infof("ImageDelete event %+v", e)
-		return em.c.updateImage(ctx, e.Name, "")
+		return em.c.updateImage(ctx, e.Name, e.RuntimeHandler)
 	}
 
 	return nil
