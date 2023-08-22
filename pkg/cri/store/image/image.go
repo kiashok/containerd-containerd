@@ -157,6 +157,7 @@ func (s *Store) update(ref string, img *Image, runtimeHandler string) error {
 		s.store.delete(oldID, ref, img.RuntimeHandler)
 	}
 	// New image. Add new image.
+	log.G(context.Background()).Debugf("!!!! pkg.cri.store update(), adding NEWWWW IMAGE s.refCache[ref] %v = img.ID %v", s.refCache[ref], img.ID)
 	s.refCache[ref] = img.ID
 	return s.store.add(*img)
 }
@@ -209,6 +210,7 @@ func (s *Store) getImage(ctx context.Context, i images.Image, runtimeHandler str
 func (s *Store) Resolve(ref string) (string, error) {
 	s.lock.RLock()
 	defer s.lock.RUnlock()
+	log.G(context.Background()).Debugf("pkg.cri.store Reolve(), ref is %v, s.refCache[ref] %v", ref, s.refCache[ref])
 	id, ok := s.refCache[ref]
 	if !ok {
 		return "", errdefs.ErrNotFound
