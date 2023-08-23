@@ -191,7 +191,7 @@ func (c *criService) PullImage(ctx context.Context, r *runtime.PullImageRequest)
 		runtimeHdlr = c.config.ContainerdConfig.DefaultRuntimeName
 	}
 	log.G(ctx).Debugf("!! criService.PullImage, runtimeHdlr %v",runtimeHdlr)
-	pullOpts = append(pullOpts, containerd.WithPlatformMatcher(c.platformMatcherMap[runtimeHdlr]))
+	pullOpts = append(pullOpts, containerd.WithRuntimeHandler(runtimeHdlr), containerd.WithPlatformMatcher(c.platformMatcherMap[runtimeHdlr]))
 
 	log.G(ctx).Debugf("!! criService.PullImage, before calling client.Pull(), platformMatcher being used is %v",c.platformMatcherMap[runtimeHdlr])
 	//
@@ -309,6 +309,7 @@ func (c *criService) createImageReference(ctx context.Context, name string, runt
 
 	updateOpts := []images.UpdateOpt {
 		images.UpdateWithFieldpaths([]string{"target", fmt.Sprintf("labels.%s",crilabels.ImageLabelKey)}),
+		images.UpdateWithRuntimeHandler(runtimeHandler),
 	}
 	_, err = c.client.ImageService().Update(ctx, img, updateOpts...)
 	return err
