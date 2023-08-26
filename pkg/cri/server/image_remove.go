@@ -22,7 +22,6 @@ import (
 
 	"github.com/containerd/containerd/errdefs"
 	"github.com/containerd/containerd/images"
-	"github.com/containerd/containerd/log"
 	"github.com/containerd/containerd/tracing"
 
 	runtime "k8s.io/cri-api/pkg/apis/runtime/v1"
@@ -55,14 +54,12 @@ func (c *criService) RemoveImage(ctx context.Context, r *runtime.RemoveImageRequ
 	span.SetAttributes(tracing.Attribute("image.id", image.ID))
 	// Remove all image references.
 	for i, ref := range image.References {
-		opts := []images.DeleteOpt {
-			images.DeleteWithRuntimeHandler(runtimeHdlr),
-		}
+		var opts []images.DeleteOpt
 		if i == len(image.References)-1 {
 			// Delete the last image reference synchronously to trigger garbage collection.
 			// This is best effort. It is possible that the image reference is deleted by
 			// someone else before this point.
-			opts = append(opts, images.SynchronousDelete())
+			opts = []images.DeleteOpt{images.SynchronousDelete()}
 		}
 		err = c.client.ImageService().Delete(ctx, ref, opts...)
 		if err == nil || errdefs.IsNotFound(err) {

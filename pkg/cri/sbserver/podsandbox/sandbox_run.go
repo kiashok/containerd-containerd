@@ -80,7 +80,11 @@ func (c *Controller) Start(ctx context.Context, id string) (cin sandbox.Controll
 	)
 
 	// Ensure sandbox container image snapshot.
-	image, err := c.ensureImageExists(ctx, c.config.SandboxImage, c.sandboxStore.Get(id).RuntimeHandler, config) // TODO: test!
+	sb, err := c.sandboxStore.Get(id)
+	if err != nil {
+		return cin, fmt.Errorf("unable to find sandbox in sandboxstore with id %q: %w", id, err)
+	}
+	image, err := c.ensureImageExists(ctx, c.config.SandboxImage, sb.RuntimeHandler, config) // TODO: test!
 	if err != nil {
 		return cin, fmt.Errorf("failed to get sandbox image %q: %w", c.config.SandboxImage, err)
 	}

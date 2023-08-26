@@ -59,6 +59,7 @@ type Image struct {
 type DeleteOptions struct {
 	Synchronous bool
 	Target      *ocispec.Descriptor
+	//	RuntimeHandler string
 	RuntimeHandler string
 }
 
@@ -84,6 +85,7 @@ func DeleteTarget(target *ocispec.Descriptor) DeleteOpt {
 	}
 }
 
+/*
 func DeleteWithRuntimeHandler(runtimeHandler string) DeleteOpt {
 	return func(ctx context.Context, o *DeleteOptions) error {
 		o.RuntimeHandler = runtimeHandler
@@ -124,16 +126,17 @@ func UpdateWithRuntimeHandler(runtimeHandler string) UpdateOpt {
 		return nil
 	}
 }
+*/
 
 // Store and interact with images
 type Store interface {
 	Get(ctx context.Context, name string) (Image, error) // TODO: test and check!
 	List(ctx context.Context, filters ...string) ([]Image, error)
-	Create(ctx context.Context, image Image, opts ...CreateOpt) (Image, error)
+	Create(ctx context.Context, image Image) (Image, error)
 
 	// Update will replace the data in the store with the provided image. If
 	// one or more fieldpaths are provided, only those fields will be updated.
-	Update(ctx context.Context, image Image, opts ...UpdateOpt) (Image, error)
+	Update(ctx context.Context, image Image, fieldpaths ...string) (Image, error)
 
 	Delete(ctx context.Context, name string, opts ...DeleteOpt) error
 }

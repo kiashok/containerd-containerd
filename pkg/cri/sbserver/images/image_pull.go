@@ -303,10 +303,7 @@ func (c *CRIImageService) createImageReference(ctx context.Context, name string,
 	}
 	// TODO(random-liu): Figure out which is the more performant sequence create then update or
 	// update then create.
-	createOpts := []containerdimages.CreateOpt {
-		containerdimages.CreateWithRuntimeHandler(runtimeHandler),
-	}
-	oldImg, err := c.client.ImageService().Create(ctx, img, createOpts...)
+	oldImg, err := c.client.ImageService().Create(ctx, img)
 	if err == nil || !errdefs.IsAlreadyExists(err) {
 		return err
 	}
@@ -314,12 +311,7 @@ func (c *CRIImageService) createImageReference(ctx context.Context, name string,
 		return nil
 	}
 
-	imageLabels := "labels."+crilabels.ImageLabelKey
-	updateOpts := []containerdimages.UpdateOpt {
-		containerdimages.UpdateWithFieldpaths([]string{"target", imageLabels}),
-		containerdimages.UpdateWithRuntimeHandler(runtimeHandler),
-	}
-	_, err = c.client.ImageService().Update(ctx, img, updateOpts...)
+	_, err = c.client.ImageService().Update(ctx, img, "target", "labels."+crilabels.ImageLabelKey)
 	return err
 }
 

@@ -64,17 +64,18 @@ func (s *remoteImages) List(ctx context.Context, filters ...string) ([]images.Im
 	return imagesFromProto(resp.Images), nil
 }
 
-func (s *remoteImages) Create(ctx context.Context, image images.Image, opts ...images.CreateOpt) (images.Image, error) {
+func (s *remoteImages) Create(ctx context.Context, image images.Image) (images.Image, error) {
+/*
 	var createOpts images.CreateOptions
 	for _, o := range opts {
 		if err := o(ctx, &createOpts); err != nil {
 			return images.Image{}, err
 		}
 	}
-
+*/
 	req := &imagesapi.CreateImageRequest{
 		Image: imageToProto(&image),
-		RuntimeHandler: createOpts.RuntimeHandler,
+		// TODO: RuntimeHandler: createOpts.RuntimeHandler,
 	}
 	if tm := epoch.FromContext(ctx); tm != nil {
 		req.SourceDateEpoch = timestamppb.New(*tm)
@@ -87,25 +88,25 @@ func (s *remoteImages) Create(ctx context.Context, image images.Image, opts ...i
 	return imageFromProto(created.Image), nil
 }
 
-func (s *remoteImages) Update(ctx context.Context, image images.Image, opts ...images.UpdateOpt) (images.Image, error) {
-
+func (s *remoteImages) Update(ctx context.Context, image images.Image, fieldpaths ...string) (images.Image, error) {
+/*
 	var updateOpts images.UpdateOptions
 	for _, o := range opts {
 		if err := o(ctx, &updateOpts); err != nil {
 			return images.Image{}, err
 		}
 	}
-
+*/
 	var updateMask *ptypes.FieldMask
-	if len(updateOpts.Fieldpaths) > 0 {
+	if len(fieldpaths) > 0 {
 		updateMask = &ptypes.FieldMask{
-			Paths: updateOpts.Fieldpaths,
+			Paths: fieldpaths,
 		}
 	}
 	req := &imagesapi.UpdateImageRequest{
 		Image:      imageToProto(&image),
 		UpdateMask: updateMask,
-		RuntimeHandler: updateOpts.RuntimeHandler,
+		// TODO: RuntimeHandler: updateOpts.RuntimeHandler,
 	}
 	if tm := epoch.FromContext(ctx); tm != nil {
 		req.SourceDateEpoch = timestamppb.New(*tm)
@@ -128,7 +129,7 @@ func (s *remoteImages) Delete(ctx context.Context, name string, opts ...images.D
 	req := &imagesapi.DeleteImageRequest{
 		Name: name,
 		Sync: do.Synchronous,
-		RuntimeHandler: do.RuntimeHandler,
+		// TODO:	RuntimeHandler: do.RuntimeHandler,
 	}
 	if do.Target != nil {
 		req.Target = oci.DescriptorToProto(*do.Target)

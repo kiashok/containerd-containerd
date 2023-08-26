@@ -282,19 +282,12 @@ func (c *Client) createNewImage(ctx context.Context, img images.Image, runtimeHa
 	defer span.End()
 	is := c.ImageService()
 	for {
-		createOpts := []images.CreateOpt {
-			images.CreateWithRuntimeHandler(runtimeHandler),
-		}
-		if created, err := is.Create(ctx, img, createOpts...); err != nil {
+		if created, err := is.Create(ctx, img); err != nil {
 			if !errdefs.IsAlreadyExists(err) {
 				return images.Image{}, err
 			}
 
-			updateOpts := []images.UpdateOpt {
-				images.UpdateWithRuntimeHandler(runtimeHandler),
-			}
-
-			updated, err := is.Update(ctx, img, updateOpts...)
+			updated, err := is.Update(ctx, img)
 			if err != nil {
 				// if image was removed, try create again
 				if errdefs.IsNotFound(err) {

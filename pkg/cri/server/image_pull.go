@@ -41,7 +41,6 @@ import (
 	"github.com/containerd/containerd/errdefs"
 	containerdimages "github.com/containerd/containerd/images"
 	"github.com/containerd/containerd/log"
-	"github.com/containerd/containerd/images"
 	"github.com/containerd/containerd/pkg/cri/annotations"
 	criconfig "github.com/containerd/containerd/pkg/cri/config"
 	crilabels "github.com/containerd/containerd/pkg/cri/labels"
@@ -288,10 +287,7 @@ func (c *criService) createImageReference(ctx context.Context, name string, runt
 	}
 	// TODO(random-liu): Figure out which is the more performant sequence create then update or
 	// update then create.
-	createOpts := []images.CreateOpt {
-		images.CreateWithRuntimeHandler(runtimeHandler),
-	}
-	oldImg, err := c.client.ImageService().Create(ctx, img, createOpts...)
+	oldImg, err := c.client.ImageService().Create(ctx, img)
 	if err == nil || !errdefs.IsAlreadyExists(err) {
 		return err
 	}
@@ -299,11 +295,7 @@ func (c *criService) createImageReference(ctx context.Context, name string, runt
 		return nil
 	}
 
-	updateOpts := []images.UpdateOpt {
-		images.UpdateWithFieldpaths([]string{"target", fmt.Sprintf("labels.%s",crilabels.ImageLabelKey)}),
-		images.UpdateWithRuntimeHandler(runtimeHandler),
-	}
-	_, err = c.client.ImageService().Update(ctx, img, updateOpts...)
+	_, err = c.client.ImageService().Update(ctx, img, "target", "labels."+crilabels.ImageLabelKey)
 	return err
 }
 
