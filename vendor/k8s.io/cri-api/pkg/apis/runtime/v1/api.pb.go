@@ -3490,11 +3490,9 @@ type ImageSpec struct {
 	// The container image reference specified by the user (e.g. image[:tag] or digest).
 	// Only set if available within the RPC context.
 	UserSpecifiedImage string `protobuf:"bytes,18,opt,name=user_specified_image,json=userSpecifiedImage,proto3" json:"user_specified_image,omitempty"`
-	// Named runtime configuration to use for this PodSandbox.
-	// If the runtime handler is unknown, this request should be rejected.  An
-	// empty string should select the default handler, equivalent to the
-	// behavior before this feature was added.
-	// See https://git.k8s.io/enhancements/keps/sig-node/585-runtime-class
+	// Runtime handler to use for pulling the image.
+	// If the runtime handler is unknown, the request should be rejected.
+	// An empty string would select the default runtime handler.
 	RuntimeHandler       string   `protobuf:"bytes,19,opt,name=runtime_handler,json=runtimeHandler,proto3" json:"runtime_handler,omitempty"`
 	XXX_NoUnkeyedLiteral struct{} `json:"-"`
 	XXX_sizecache        int32    `json:"-"`

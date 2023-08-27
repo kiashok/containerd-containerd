@@ -220,10 +220,6 @@ func handleForwardResponseStreamError(ctx context.Context, wroteHeader bool, mar
 		grpclog.Infof("Failed to send delimiter chunk: %v", err)
 		return
 	}
-	if _, derr := w.Write(delimiter); derr != nil {
-		grpclog.Infof("Failed to send delimiter chunk: %v", err)
-		return
-	}
 }
 
 func errorChunk(st *status.Status) map[string]proto.Message {

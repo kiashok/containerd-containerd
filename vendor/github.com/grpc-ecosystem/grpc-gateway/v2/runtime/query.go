@@ -320,23 +320,13 @@ func parseMessage(msgDescriptor protoreflect.MessageDescriptor, value string) (p
 		msg = fm
 	case "google.protobuf.Value":
 		var v structpb.Value
-<<<<<<< HEAD
 		if err := protojson.Unmarshal([]byte(value), &v); err != nil {
-=======
-		err := protojson.Unmarshal([]byte(value), &v)
-		if err != nil {
->>>>>>> b2b24b9c8... Update cri-api to local cri changes
 			return protoreflect.Value{}, err
 		}
 		msg = &v
 	case "google.protobuf.Struct":
 		var v structpb.Struct
-<<<<<<< HEAD
 		if err := protojson.Unmarshal([]byte(value), &v); err != nil {
-=======
-		err := protojson.Unmarshal([]byte(value), &v)
-		if err != nil {
->>>>>>> b2b24b9c8... Update cri-api to local cri changes
 			return protoreflect.Value{}, err
 		}
 		msg = &v

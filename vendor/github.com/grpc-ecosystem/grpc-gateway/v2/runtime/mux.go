@@ -44,9 +44,6 @@ const (
 )
 
 var encodedPathSplitter = regexp.MustCompile("(/|%2F)")
-var (
-	encodedPathSplitter = regexp.MustCompile("(/|%2F)")
-)
 
 // A HandlerFunc handles a specific pair of path pattern and HTTP method.
 type HandlerFunc func(w http.ResponseWriter, r *http.Request, pathParams map[string]string)
@@ -234,10 +231,6 @@ func WithHealthEndpointAt(healthCheckClient grpc_health_v1.HealthClient, endpoin
 				w.Header().Set("Content-Type", "application/json")
 
 				if resp.GetStatus() != grpc_health_v1.HealthCheckResponse_SERVING {
-<<<<<<< HEAD
-=======
-					var err error
->>>>>>> b2b24b9c8... Update cri-api to local cri changes
 					switch resp.GetStatus() {
 					case grpc_health_v1.HealthCheckResponse_NOT_SERVING, grpc_health_v1.HealthCheckResponse_UNKNOWN:
 						err = status.Error(codes.Unavailable, resp.String())
@@ -327,20 +320,6 @@ func (s *ServeMux) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		path = r.URL.RawPath
 	}
 
-<<<<<<< HEAD
-=======
-	var components []string
-	// since in UnescapeModeLegacy, the URL will already have been fully unescaped, if we also split on "%2F"
-	// in this escaping mode we would be double unescaping but in UnescapingModeAllCharacters, we still do as the
-	// path is the RawPath (i.e. unescaped). That does mean that the behavior of this function will change its default
-	// behavior when the UnescapingModeDefault gets changed from UnescapingModeLegacy to UnescapingModeAllExceptReserved
-	if s.unescapingMode == UnescapingModeAllCharacters {
-		components = encodedPathSplitter.Split(path[1:], -1)
-	} else {
-		components = strings.Split(path[1:], "/")
-	}
-
->>>>>>> b2b24b9c8... Update cri-api to local cri changes
 	if override := r.Header.Get("X-HTTP-Method-Override"); override != "" && s.isPathLengthFallback(r) {
 		r.Method = strings.ToUpper(override)
 		if err := r.ParseForm(); err != nil {
