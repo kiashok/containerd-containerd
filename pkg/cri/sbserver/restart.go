@@ -28,6 +28,8 @@ import (
 	containerdio "github.com/containerd/containerd/cio"
 	"github.com/containerd/containerd/errdefs"
 	containerdimages "github.com/containerd/containerd/images"
+	"github.com/containerd/containerd/log"
+	"github.com/containerd/containerd/labels"
 	criconfig "github.com/containerd/containerd/pkg/cri/config"
 	"github.com/containerd/containerd/pkg/cri/sbserver/podsandbox"
 	"github.com/containerd/containerd/pkg/netns"
@@ -429,12 +431,12 @@ func getNetNS(meta *sandboxstore.Metadata) *netns.NetNS {
 }
 
 // loadImages loads images from containerd.
-func (c *criService) loadImages(ctx context.Context, cImages []containerd.ImagesWrapper) {
+func (c *criService) loadImages(ctx context.Context, cImages []containerd.Image) {
 	snapshotter := c.config.ContainerdConfig.Snapshotter
 	var wg sync.WaitGroup
-	for _, iWrapper := range cImages {
+	for _, i := range cImages {
 		wg.Add(1)
-		i := iWrapper.Images
+		i := i
 		go func() {
 			defer wg.Done()
 			ok, _, _, _, err := containerdimages.Check(ctx, i.ContentStore(), i.Target(), i.Platform())
@@ -456,7 +458,9 @@ func (c *criService) loadImages(ctx context.Context, cImages []containerd.Images
 				log.G(ctx).Warnf("The image %s is not unpacked.", i.Name())
 				// TODO(random-liu): Consider whether we should try unpack here.
 			}
-			if err := c.UpdateImage(ctx, i.Name(), iWrapper.RuntimeHandler); err != nil {
+			imageLabel := i.Labels()
+			runtimeHandler := imageLabel[labels.RuntimeHandlerLabel]
+			if err := c.UpdateImage(ctx, i.Name(), runtimeHandler); err != nil {
 				log.G(ctx).WithError(err).Warnf("Failed to update reference for image %q", i.Name())
 				return
 			}

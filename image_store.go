@@ -18,12 +18,15 @@ package containerd
 
 import (
 	"context"
+	"fmt"
 	
 	imagesapi "github.com/containerd/containerd/api/services/images/v1"
 	"github.com/containerd/containerd/errdefs"
 	"github.com/containerd/containerd/images"
 	"github.com/containerd/containerd/oci"
 	"github.com/containerd/containerd/log"
+	"github.com/containerd/containerd/log"
+	"github.com/containerd/containerd/labels"
 	"github.com/containerd/containerd/pkg/epoch"
 	"github.com/containerd/containerd/protobuf"
 	ptypes "github.com/containerd/containerd/protobuf/types"
@@ -73,9 +76,15 @@ func (s *remoteImages) Create(ctx context.Context, image images.Image) (images.I
 		}
 	}
 */
+	log.G(ctx).Debugf("!! image_store.go Create() labels:", image)
+	runtimeHandler := image.Labels[labels.RuntimeHandlerLabel]
+	if runtimeHandler == "" {
+		log.G(ctx).Errorf("!! image_store.go Image API runtimeHandler is empty")
+	}
 	req := &imagesapi.CreateImageRequest{
 		Image: imageToProto(&image),
 		// TODO: RuntimeHandler: createOpts.RuntimeHandler,
+		RuntimeHandler: runtimeHandler,
 	}
 	if tm := epoch.FromContext(ctx); tm != nil {
 		req.SourceDateEpoch = timestamppb.New(*tm)
@@ -97,16 +106,23 @@ func (s *remoteImages) Update(ctx context.Context, image images.Image, fieldpath
 		}
 	}
 */
+	log.G(ctx).Debugf("!! image_store.go Update() labels:", image)
 	var updateMask *ptypes.FieldMask
 	if len(fieldpaths) > 0 {
 		updateMask = &ptypes.FieldMask{
 			Paths: fieldpaths,
 		}
 	}
+	runtimeHandler := image.Labels[labels.RuntimeHandlerLabel]
+	if runtimeHandler == "" {
+		log.G(ctx).Errorf("!! image_store.go Image API runtimeHandler is empty")
+	}
+
 	req := &imagesapi.UpdateImageRequest{
 		Image:      imageToProto(&image),
 		UpdateMask: updateMask,
 		// TODO: RuntimeHandler: updateOpts.RuntimeHandler,
+		RuntimeHandler: runtimeHandler,
 	}
 	if tm := epoch.FromContext(ctx); tm != nil {
 		req.SourceDateEpoch = timestamppb.New(*tm)
@@ -120,16 +136,25 @@ func (s *remoteImages) Update(ctx context.Context, image images.Image, fieldpath
 }
 
 func (s *remoteImages) Delete(ctx context.Context, name string, opts ...images.DeleteOpt) error {
+	image, err := s.Get(ctx, name)
+	if err != nil {
+		return fmt.Errorf("Unable too get image: %v, error %v", name, err)
+	}
 	var do images.DeleteOptions
 	for _, opt := range opts {
 		if err := opt(ctx, &do); err != nil {
 			return err
 		}
 	}
+	runtimeHandler := image.Labels[labels.RuntimeHandlerLabel]
+	if runtimeHandler == "" {
+		log.G(ctx).Errorf("!! image_store.go Image API runtimeHandler is empty")
+	}
 	req := &imagesapi.DeleteImageRequest{
 		Name: name,
 		Sync: do.Synchronous,
 		// TODO:	RuntimeHandler: do.RuntimeHandler,
+		RuntimeHandler: runtimeHandler,
 	}
 	if do.Target != nil {
 		req.Target = oci.DescriptorToProto(*do.Target)

@@ -20,6 +20,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"context"
 	"path/filepath"
 
 	"github.com/containerd/containerd"
@@ -86,14 +87,6 @@ func initCRIService(ic *plugin.InitContext) (interface{}, error) {
 		return nil, fmt.Errorf("failed to create containerd client: %w", err)
 	}
 
-	// guestPlatform in runtime struct for a runtime helps to support pulling of imager
-	// per runtime class. 
-	// guestPlatform is used to specify an alternate platform to use with platform matcher
-	// so that different versions of the same image can be pulled for different runtime handlers.
-	// guestPlatform.OS and guestPlatform.Architecture are compusory fields to be specified and
-	// if platform is windows, OSVersion needs to be specified too.
-	// Overriding the host's default platform matcher with guestPlatform is not allowed for
-	// windows process isolation as exact OSVersion match between host and guest is required.
 	platformMap := make(map[string]platforms.MatchComparer)
 	for k, ociRuntime := range c.PluginConfig.ContainerdConfig.Runtimes {
 		// consider guesPlatform values only if OS and Architecture are specified
@@ -111,7 +104,9 @@ func initCRIService(ic *plugin.InitContext) (interface{}, error) {
 					if ociRuntime.GuestPlatform.OSVersion == "" {
 						return nil, fmt.Errorf("guestPlatform.OSVersion needs to be specified for windows hyperV runtimes")
 					}
+					
 					platformMap[k] = platforms.Only(ociRuntime.GuestPlatform)
+					log.G(ctx).Debugf(" !! criservice.Initcrservice() for %v platformMatcher %v", k, platformMap[k])
 				} else {
 					// Fail initialization if guestPlatform was specified for process isolation.
 					// For process isolated cases, we only allow the host's default platform matcher to
@@ -129,16 +124,13 @@ func initCRIService(ic *plugin.InitContext) (interface{}, error) {
 		}
 	}
 
+	for k, matcher := range platformMap {
+		log.G(ctx).Debugf("!! runtime %v matcher %v", k, matcher)
+	}
 	var s server.CRIService
-<<<<<<< HEAD
 	if os.Getenv("DISABLE_CRI_SANDBOXES") == "" {
 		log.G(ctx).Info("using CRI Sandbox server - use DISABLE_CRI_SANDBOXES=1 to fallback to legacy CRI")
-		s, err = sbserver.NewCRIService(c, client, getNRIAPI(ic))
-=======
-	if os.Getenv("ENABLE_CRI_SANDBOXES") != "" {
-		log.G(ctx).Info("using experimental CRI Sandbox server - unset ENABLE_CRI_SANDBOXES to disable")
 		s, err = sbserver.NewCRIService(c, client, platformMap, getNRIAPI(ic))
->>>>>>> da9b8b482... This commit does the following:
 	} else {
 		log.G(ctx).Info("using legacy CRI server")
 		s, err = server.NewCRIService(c, client, platformMap, getNRIAPI(ic))

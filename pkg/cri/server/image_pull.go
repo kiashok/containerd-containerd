@@ -41,9 +41,11 @@ import (
 	"github.com/containerd/containerd/errdefs"
 	containerdimages "github.com/containerd/containerd/images"
 	"github.com/containerd/containerd/log"
+	//"github.com/containerd/containerd/images"
 	"github.com/containerd/containerd/pkg/cri/annotations"
 	criconfig "github.com/containerd/containerd/pkg/cri/config"
 	crilabels "github.com/containerd/containerd/pkg/cri/labels"
+	ctrdLabels "github.com/containerd/containerd/labels"
 	snpkg "github.com/containerd/containerd/pkg/snapshotters"
 	"github.com/containerd/containerd/remotes/docker"
 	"github.com/containerd/containerd/remotes/docker/config"
@@ -155,7 +157,19 @@ func (c *criService) PullImage(ctx context.Context, r *runtime.PullImageRequest)
 		tracing.Attribute("snapshotter.name", snapshotter),
 	)
 
+		// get runtime handler from pull request or use defaut runtime class name if one
+	// was not specified
+	runtimeHdlr := r.GetImage().GetRuntimeHandler()
+	if runtimeHdlr == "" {
+		runtimeHdlr = c.config.ContainerdConfig.DefaultRuntimeName
+	}
+
+	log.G(ctx).Debugf(" !! criservice.ImagePull() runtimehandler %v", runtimeHdlr)
+	log.G(ctx).Debugf(" !! criservice.ImagePull() platformMatcher %v", c.platformMatcherMap[runtimeHdlr])
+
 	labels := c.getLabels(ctx, ref)
+	// set runtime handler label to indicate runtime class used to pull image
+	labels[ctrdLabels.RuntimeHandlerLabel] = runtimeHdlr
 
 	pullOpts := []containerd.RemoteOpt{
 		containerd.WithSchema1Conversion, //nolint:staticcheck // Ignore SA1019. Need to keep deprecated package for compatibility.
@@ -176,19 +190,13 @@ func (c *criService) PullImage(ctx context.Context, r *runtime.PullImageRequest)
 			containerd.WithImageHandlerWrapper(snpkg.AppendInfoHandlerWrapper(ref)))
 	}
 
+	pullOpts = append(pullOpts, containerd.WithRuntimeHandler(runtimeHdlr), containerd.WithPlatformMatcher(c.platformMatcherMap[runtimeHdlr]))
+	
 	if c.config.ContainerdConfig.DiscardUnpackedLayers {
 		// Allows GC to clean layers up from the content store after unpacking
 		pullOpts = append(pullOpts,
 			containerd.WithChildLabelMap(containerdimages.ChildGCLabelsFilterLayers))
 	}
-
-	// get runtime handler from pull request or use defaut runtime class name if one
-	// was not specified
-	runtimeHdlr := r.GetImage().GetRuntimeHandler()
-	if runtimeHdlr == "" {
-		runtimeHdlr = c.config.ContainerdConfig.DefaultRuntimeName
-	}
-	pullOpts = append(pullOpts, containerd.WithRuntimeHandler(runtimeHdlr), containerd.WithPlatformMatcher(c.platformMatcherMap[runtimeHdlr]))
 
 	pullReporter.start(pctx)
 	image, err := c.client.Pull(pctx, ref, pullOpts...)
@@ -198,6 +206,7 @@ func (c *criService) PullImage(ctx context.Context, r *runtime.PullImageRequest)
 	}
 	span.AddEvent("Pull and unpack image complete")
 
+	log.G(ctx).Debugf(" !! criservice.Pull() %v", image)
 	configDesc, err := image.Config(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("get image config descriptor: %w", err)

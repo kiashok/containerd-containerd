@@ -31,6 +31,7 @@ import (
 	"github.com/containerd/containerd/platforms"
 	"github.com/containerd/log"
 	"github.com/containerd/containerd/log"
+	"github.com/containerd/containerd/labels"
 	"github.com/containerd/typeurl/v2"
 	"golang.org/x/sync/errgroup"
 	runtime "k8s.io/cri-api/pkg/apis/runtime/v1"
@@ -443,13 +444,13 @@ func (c *criService) loadSandbox(ctx context.Context, cntr containerd.Container)
 }
 
 // loadImages loads images from containerd.
-func (c *criService) loadImages(ctx context.Context, cImages []containerd.ImagesWrapper) {
+func (c *criService) loadImages(ctx context.Context, cImages []containerd.Image) {
 	log.G(ctx).Debugf("!!! criservice.loadImages()")
 	snapshotter := c.config.ContainerdConfig.Snapshotter
 	var wg sync.WaitGroup
-	for _, iWrapper := range cImages {
+	for _, i := range cImages {
 		wg.Add(1)
-		i := iWrapper.Images
+		i := i
 		go func() {
 			ok, _, _, _, err := containerdimages.Check(ctx, i.ContentStore(), i.Target(), i.Platform())
 			if err != nil {
@@ -471,7 +472,9 @@ func (c *criService) loadImages(ctx context.Context, cImages []containerd.Images
 				log.G(ctx).Warnf("The image %s is not unpacked.", i.Name())
 				// TODO(random-liu): Consider whether we should try unpack here.
 			}
-			if err := c.updateImage(ctx, i.Name(), iWrapper.RuntimeHandler); err != nil {
+			imageLabel := i.Labels()
+			runtimeHandler := imageLabel[labels.RuntimeHandlerLabel]
+			if err := c.updateImage(ctx, i.Name(), runtimeHandler); err != nil {
 				log.G(ctx).WithError(err).Warnf("Failed to update reference for image %q", i.Name())
 				return
 			}

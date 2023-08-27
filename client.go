@@ -41,6 +41,7 @@ import (
 	versionservice "github.com/containerd/containerd/api/services/version/v1"
 	apitypes "github.com/containerd/containerd/api/types"
 	"github.com/containerd/containerd/containers"
+	"github.com/containerd/containerd/labels"
 	"github.com/containerd/containerd/content"
 	contentproxy "github.com/containerd/containerd/content/proxy"
 	"github.com/containerd/containerd/defaults"
@@ -502,6 +503,7 @@ func (c *Client) GetImage(ctx context.Context, ref string, opts ...GetImageOpt) 
 		return nil, err
 	}
 
+	log.G(ctx).Debugf("!! client.GetImage(), image is %v", i)
 	if len(opts) == 0 {
 		return NewImage(c, i), nil
 	} else {
@@ -546,12 +548,13 @@ func checkIfValidPlatforMatcher(ctx context.Context, provider content.Provider, 
 	return true
 }
 
+/*
 type ImagesWrapper struct {
 	Images Image
 	RuntimeHandler string
 }
-
-func (c *Client) ListImagesWithPlatformMatcher(ctx context.Context, opts ...ListImageOpt) ([]ImagesWrapper, error) {
+*/
+func (c *Client) ListImagesWithPlatformMatcher(ctx context.Context, opts ...ListImageOpt) ([]Image, error) {
 	log.G(ctx).Debugf("!! ListImagesWithplatformMatcher client %v", c)
 	var listImgOpts ListImageOptions
 	for _, o := range opts {
@@ -565,6 +568,20 @@ func (c *Client) ListImagesWithPlatformMatcher(ctx context.Context, opts ...List
 		return nil, err
 	}
 
+	images := make([]Image, len(imgs))
+	if len(opts) == 0 { 
+		for i, img := range imgs {
+			images[i] = NewImage(c, img)
+		}
+	} else {
+		for i, img := range imgs {
+			runtimeHandler := img.Labels[labels.RuntimeHandlerLabel]
+			images[i] = NewImageWithPlatform(c, img, listImgOpts.PlatformMatcherMap[runtimeHandler])
+			//NewImage(c, img)
+		}
+	}
+	return images, nil
+	/*
 	imagesW := make([]ImagesWrapper, len(imgs))
 	if len(opts) == 0 { 
 		for i, img := range imgs {
@@ -587,6 +604,7 @@ func (c *Client) ListImagesWithPlatformMatcher(ctx context.Context, opts ...List
 		}
 	}
 	return imagesW, nil
+	*/
 }
 
 // ListImages returns all existing images

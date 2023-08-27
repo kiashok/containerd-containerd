@@ -26,6 +26,7 @@ import (
 	"github.com/containerd/containerd/pkg/unpack"
 	"github.com/containerd/containerd/platforms"
 	"github.com/containerd/containerd/remotes"
+	"github.com/containerd/containerd/log"
 	"github.com/containerd/containerd/remotes/docker"
 	"github.com/containerd/containerd/remotes/docker/schema1" //nolint:staticcheck // Ignore SA1019. Need to keep deprecated package for compatibility.
 	"github.com/containerd/containerd/tracing"
@@ -51,6 +52,8 @@ func (c *Client) Pull(ctx context.Context, ref string, opts ...RemoteOpt) (_ Ima
 		}
 	}
 
+
+	log.G(ctx).Debugf("!! Pull(), pullctx.PlatformMatcher %v", pullCtx.PlatformMatcher)
 	if pullCtx.PlatformMatcher == nil {
 		if len(pullCtx.Platforms) > 1 {
 			return nil, errors.New("cannot pull multiplatform image locally, try Fetch")
@@ -282,6 +285,7 @@ func (c *Client) createNewImage(ctx context.Context, img images.Image, runtimeHa
 	defer span.End()
 	is := c.ImageService()
 	for {
+		log.G(ctx).Debugf("!! createnewImage %v img", img)
 		if created, err := is.Create(ctx, img); err != nil {
 			if !errdefs.IsAlreadyExists(err) {
 				return images.Image{}, err
