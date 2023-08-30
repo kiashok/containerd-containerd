@@ -173,7 +173,7 @@ func (c *criService) localResolve(refOrID string, runtimeHandler string) (images
 			if err != nil {
 				return ""
 			}
-			id, err := c.imageStore.Resolve(normalized.String())
+			id, err := c.imageStore.Resolve(normalized.String(), runtimeHandler)
 			if err != nil {
 				return ""
 			}

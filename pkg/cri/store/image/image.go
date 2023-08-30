@@ -136,7 +136,9 @@ func (s *Store) Update(ctx context.Context, ref string, runtimeHandler string) e
 // update updates the internal cache. img == nil means that
 // the image does not exist in containerd.
 func (s *Store) update(ref string, img *Image, runtimeHandler string) error {
-	oldID, oldExist := s.refCache[ref]
+	// key
+	key := fmt.Sprintf(imageKeyFormat, ref, runtimeHandler)
+	oldID, oldExist := s.refCache[key] //ref
 	log.G(context.Background()).Debugf("!! pkg.cri.sote update() ctrd.image with ref %v, img: %v, runtimeHdlr %v", ref, img, runtimeHandler)
 	log.G(context.Background()).Debugf("!! pkg.cri.sote update() oldID %v, oldExist %v", oldID, oldExist)
 
@@ -145,7 +147,7 @@ func (s *Store) update(ref string, img *Image, runtimeHandler string) error {
 		if oldExist {
 			// Remove the reference from the store.
 			s.store.delete(oldID, ref, runtimeHandler)
-			delete(s.refCache, ref)
+			delete(s.refCache, key) //ref
 		}
 		return nil
 	}
@@ -157,7 +159,7 @@ func (s *Store) update(ref string, img *Image, runtimeHandler string) error {
 		s.store.delete(oldID, ref, img.RuntimeHandler)
 	}
 	// New image. Add new image.
-	s.refCache[ref] = img.ID
+	s.refCache[key] = img.ID //ref
 	return s.store.add(*img)
 }
 
@@ -206,10 +208,11 @@ func (s *Store) getImage(ctx context.Context, i images.Image, runtimeHandler str
 }
 
 // Resolve resolves a image reference to image id.
-func (s *Store) Resolve(ref string) (string, error) {
+func (s *Store) Resolve(ref string, runtimeHandler string) (string, error) {
 	s.lock.RLock()
 	defer s.lock.RUnlock()
-	id, ok := s.refCache[ref]
+	key := fmt.Sprintf(imageKeyFormat, ref, runtimeHandler)
+	id, ok := s.refCache[key] //ref
 	if !ok {
 		return "", errdefs.ErrNotFound
 	}

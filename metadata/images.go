@@ -28,6 +28,7 @@ import (
 	"github.com/containerd/containerd/errdefs"
 	"github.com/containerd/containerd/filters"
 	"github.com/containerd/containerd/images"
+	"github.com/containerd/containerd/log"
 	"github.com/containerd/containerd/labels"
 	"github.com/containerd/containerd/metadata/boltutil"
 	"github.com/containerd/containerd/namespaces"
@@ -121,6 +122,7 @@ func (s *imageStore) List(ctx context.Context, fs ...string) ([]images.Image, er
 }
 
 func (s *imageStore) Create(ctx context.Context, image images.Image) (images.Image, error) {
+	log.G(ctx).Debugf("!! metadata create(), image is %v", image)
 	namespace, err := namespaces.NamespaceRequired(ctx)
 	if err != nil {
 		return images.Image{}, err
@@ -141,6 +143,7 @@ func (s *imageStore) Create(ctx context.Context, image images.Image) (images.Ima
 		}
 
 		ibkt, err := bkt.CreateBucket([]byte(image.Name))
+		log.G(ctx).Debugf("!! metadata create(), create bucket returned %v", err)
 		if err != nil {
 			if err != bolt.ErrBucketExists {
 				return err
