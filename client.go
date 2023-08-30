@@ -427,7 +427,7 @@ func (c *Client) Fetch(ctx context.Context, ref string, opts ...RemoteOpt) (imag
 	if err != nil {
 		return images.Image{}, err
 	}
-	return c.createNewImage(ctx, img, fetchCtx.RuntimeHandler)
+	return c.createNewImage(ctx, img)
 }
 
 // Push uploads the provided content to a remote resource
@@ -576,6 +576,7 @@ func (c *Client) ListImagesWithPlatformMatcher(ctx context.Context, opts ...List
 	} else {
 		for i, img := range imgs {
 			runtimeHandler := img.Labels[labels.RuntimeHandlerLabel]
+			log.G(ctx).Debugf("!! ListImagesWithplatformMatcher runtimeHandler for image %v is %v", img, runtimeHandler)
 			images[i] = NewImageWithPlatform(c, img, listImgOpts.PlatformMatcherMap[runtimeHandler])
 			//NewImage(c, img)
 		}

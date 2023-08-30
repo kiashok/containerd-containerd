@@ -45,6 +45,7 @@ import (
 	"github.com/containerd/containerd/pkg/cri/annotations"
 	criconfig "github.com/containerd/containerd/pkg/cri/config"
 	crilabels "github.com/containerd/containerd/pkg/cri/labels"
+	ctrdLabels "github.com/containerd/containerd/labels"
 	snpkg "github.com/containerd/containerd/pkg/snapshotters"
 	"github.com/containerd/containerd/remotes/docker"
 	"github.com/containerd/containerd/remotes/docker/config"
@@ -150,13 +151,22 @@ func (c *CRIImageService) PullImage(ctx context.Context, r *runtime.PullImageReq
 	if err != nil {
 		return nil, err
 	}
-	log.G(ctx).Debugf("PullImage %q with snapshotter %s", ref, snapshotter)
+	log.G(ctx).Debugf("sbserver PullImage %q with snapshotter %s", ref, snapshotter)
 	span.SetAttributes(
 		tracing.Attribute("image.ref", ref),
 		tracing.Attribute("snapshotter.name", snapshotter),
 	)
 
+	// get runtime handler from pull request or use defaut runtime class name if one
+	// was not specified
+	runtimeHdlr := r.GetImage().GetRuntimeHandler()
+	if runtimeHdlr == "" {
+		runtimeHdlr = c.config.ContainerdConfig.DefaultRuntimeName
+	}
+
 	labels := c.getLabels(ctx, ref)
+	// set runtime handler label to indicate runtime class used to pull image
+	labels[ctrdLabels.RuntimeHandlerLabel] = runtimeHdlr
 
 	pullOpts := []containerd.RemoteOpt{
 		containerd.WithSchema1Conversion, //nolint:staticcheck // Ignore SA1019. Need to keep deprecated package for compatibility.
@@ -169,6 +179,7 @@ func (c *CRIImageService) PullImage(ctx context.Context, r *runtime.PullImageReq
 		containerd.WithUnpackOpts([]containerd.UnpackOpt{
 			containerd.WithUnpackDuplicationSuppressor(c.unpackDuplicationSuppressor),
 		}),
+		containerd.WithPlatformMatcher(c.platformMatcherMap[runtimeHdlr]),
 	}
 
 	pullOpts = append(pullOpts, c.encryptedImagesPullOpts()...)
@@ -182,14 +193,6 @@ func (c *CRIImageService) PullImage(ctx context.Context, r *runtime.PullImageReq
 		pullOpts = append(pullOpts,
 			containerd.WithChildLabelMap(containerdimages.ChildGCLabelsFilterLayers))
 	}
-
-	// get runtime handler from pull request or use defaut runtime class name if one
-	// was not specified
-	runtimeHdlr := r.GetImage().GetRuntimeHandler()
-	if runtimeHdlr == "" {
-		runtimeHdlr = c.config.ContainerdConfig.DefaultRuntimeName
-	}
-	pullOpts = append(pullOpts, containerd.WithPlatformMatcher(c.platformMatcherMap[runtimeHdlr]))
 
 	pullReporter.start(pctx)
 	image, err := c.client.Pull(pctx, ref, pullOpts...)
@@ -210,7 +213,7 @@ func (c *CRIImageService) PullImage(ctx context.Context, r *runtime.PullImageReq
 		if r == "" {
 			continue
 		}
-		if err := c.createImageReference(ctx, r, runtimeHdlr, image.Target(), labels); err != nil {
+		if err := c.createImageReference(ctx, r, image.Target(), labels); err != nil {
 			return nil, fmt.Errorf("failed to create image reference %q: %w", r, err)
 		}
 		// Update image store to reflect the newest state in containerd.
@@ -294,7 +297,7 @@ func ParseAuth(auth *runtime.AuthConfig, host string) (string, string, error) {
 // Note that because create and update are not finished in one transaction, there could be race. E.g.
 // the image reference is deleted by someone else after create returns already exists, but before update
 // happens.
-func (c *CRIImageService) createImageReference(ctx context.Context, name string, runtimeHandler string, desc imagespec.Descriptor, labels map[string]string) error {
+func (c *CRIImageService) createImageReference(ctx context.Context, name string, desc imagespec.Descriptor, labels map[string]string) error {
 	img := containerdimages.Image{
 		Name:   name,
 		Target: desc,
@@ -359,14 +362,14 @@ func (c *CRIImageService) UpdateImage(ctx context.Context, r string, runtimeHand
 		}
 		id := configDesc.Digest.String()
 		labels := c.getLabels(ctx, id)
-		if err := c.createImageReference(ctx, id, runtimeHandler, img.Target(), labels); err != nil {
+		if err := c.createImageReference(ctx, id, img.Target(), labels); err != nil {
 			return fmt.Errorf("create image id reference %q: %w", id, err)
 		}
 		if err := c.imageStore.Update(ctx, id, runtimeHandler); err != nil { // TODO: test and check!
 			return fmt.Errorf("update image store for %q: %w", id, err)
 		}
 		// The image id is ready, add the label to mark the image as managed.
-		if err := c.createImageReference(ctx, r, runtimeHandler, img.Target(), labels); err != nil {
+		if err := c.createImageReference(ctx, r, img.Target(), labels); err != nil {
 			return fmt.Errorf("create managed label: %w", err)
 		}
 	}

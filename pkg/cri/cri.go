@@ -20,7 +20,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"context"
+	//"context"
 	"path/filepath"
 
 	"github.com/containerd/containerd"

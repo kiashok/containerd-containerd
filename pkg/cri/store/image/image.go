@@ -112,6 +112,7 @@ func (s *Store) Update(ctx context.Context, ref string, runtimeHandler string) e
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
+	log.G(ctx).Debugf("!! pkg.cri.sote Update() inage with ref %v, runtimeHdlr %v", ref, runtimeHandler)
 	getImageOpts := []containerd.GetImageOpt{
 		containerd.GetImageWithPlatformMatcher(s.platformMatcherMap[runtimeHandler]),
 	}
@@ -136,6 +137,9 @@ func (s *Store) Update(ctx context.Context, ref string, runtimeHandler string) e
 // the image does not exist in containerd.
 func (s *Store) update(ref string, img *Image, runtimeHandler string) error {
 	oldID, oldExist := s.refCache[ref]
+	log.G(context.Background()).Debugf("!! pkg.cri.sote update() ctrd.image with ref %v, img: %v, runtimeHdlr %v", ref, img, runtimeHandler)
+	log.G(context.Background()).Debugf("!! pkg.cri.sote update() oldID %v, oldExist %v", oldID, oldExist)
+
 	if img == nil {
 		// The image reference doesn't exist in containerd.
 		if oldExist {
@@ -253,6 +257,7 @@ func (s *store) add(img Image) error {
 	}
 
 	key := fmt.Sprintf(imageKeyFormat, img.ID, img.RuntimeHandler)
+	log.G(context.Background()).Debugf("!! store.add() , key %v", key)
 	i, ok := s.images[key]
 	if !ok {
 		// If the image doesn't exist, add it.
@@ -278,6 +283,7 @@ func (s *store) get(id, runtimeHandler string) (Image, error) {
 	}
 
 	key := fmt.Sprintf(imageKeyFormat, digest.String(), runtimeHandler)
+	log.G(context.Background()).Debugf("!! store.get() , key %v", key)
 	if i, ok := s.images[key]; ok {
 		return i, nil
 	}
@@ -287,6 +293,7 @@ func (s *store) get(id, runtimeHandler string) (Image, error) {
 func (s *store) delete(id, ref, runtimeHandler string) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
+	log.G(context.Background()).Debugf("!! pkg.cri.sote delete() ctrd.image with ref %v, runtimeHdlr %v", ref, runtimeHandler)
 	digest, err := s.digestSet.Lookup(id)
 	if err != nil {
 		// Note: The idIndex.Delete and delete doesn't handle truncated index.
@@ -295,6 +302,7 @@ func (s *store) delete(id, ref, runtimeHandler string) {
 	}
 
 	key := fmt.Sprintf(imageKeyFormat, digest.String(), runtimeHandler)
+	log.G(context.Background()).Debugf("!! store.delete() , key %v", key)
 	i, ok := s.images[key]
 	if !ok {
 		return

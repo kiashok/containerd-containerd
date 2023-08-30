@@ -78,6 +78,7 @@ func (s *remoteImages) Create(ctx context.Context, image images.Image) (images.I
 */
 	log.G(ctx).Debugf("!! image_store.go Create() labels:", image)
 	runtimeHandler := image.Labels[labels.RuntimeHandlerLabel]
+	log.G(ctx).Debugf("!! image_store.go Create() runtimeHandelr:", runtimeHandler)
 	if runtimeHandler == "" {
 		log.G(ctx).Errorf("!! image_store.go Image API runtimeHandler is empty")
 	}
@@ -115,7 +116,7 @@ func (s *remoteImages) Update(ctx context.Context, image images.Image, fieldpath
 	}
 	runtimeHandler := image.Labels[labels.RuntimeHandlerLabel]
 	if runtimeHandler == "" {
-		log.G(ctx).Errorf("!! image_store.go Image API runtimeHandler is empty")
+		log.G(ctx).Errorf("!! image_store.go Update API runtimeHandler is empty")
 	}
 
 	req := &imagesapi.UpdateImageRequest{

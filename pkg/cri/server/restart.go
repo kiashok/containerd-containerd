@@ -446,6 +446,10 @@ func (c *criService) loadSandbox(ctx context.Context, cntr containerd.Container)
 // loadImages loads images from containerd.
 func (c *criService) loadImages(ctx context.Context, cImages []containerd.Image) {
 	log.G(ctx).Debugf("!!! criservice.loadImages()")
+	for _, i := range cImages {
+		log.G(ctx).Debugf("!!! criservice.loadImages(),image i %v", i)
+		log.G(ctx).Debugf("!!! criservice.loadImages(),platform for image i %v", i.Platform())
+	}
 	snapshotter := c.config.ContainerdConfig.Snapshotter
 	var wg sync.WaitGroup
 	for _, i := range cImages {

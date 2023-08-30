@@ -54,6 +54,7 @@ func (c *Client) Pull(ctx context.Context, ref string, opts ...RemoteOpt) (_ Ima
 
 
 	log.G(ctx).Debugf("!! Pull(), pullctx.PlatformMatcher %v", pullCtx.PlatformMatcher)
+	log.G(ctx).Debugf("!! Pull(), pullctx.labels %v", pullCtx.Labels)
 	if pullCtx.PlatformMatcher == nil {
 		if len(pullCtx.Platforms) > 1 {
 			return nil, errors.New("cannot pull multiplatform image locally, try Fetch")
@@ -142,6 +143,8 @@ func (c *Client) Pull(ctx context.Context, ref string, opts ...RemoteOpt) (_ Ima
 		return nil, err
 	}
 
+	log.G(ctx).Debugf("!! client.Pull() fetch returned img: %v", img)
+
 	// NOTE(fuweid): unpacker defers blobs download. before create image
 	// record in ImageService, should wait for unpacking(including blobs
 	// download).
@@ -156,7 +159,7 @@ func (c *Client) Pull(ctx context.Context, ref string, opts ...RemoteOpt) (_ Ima
 		unpackSpan.End()
 	}
 
-	img, err = c.createNewImage(ctx, img, pullCtx.RuntimeHandler)
+	img, err = c.createNewImage(ctx, img)
 	if err != nil {
 		return nil, err
 	}
@@ -280,7 +283,7 @@ func (c *Client) fetch(ctx context.Context, rCtx *RemoteContext, ref string, lim
 	}, nil
 }
 
-func (c *Client) createNewImage(ctx context.Context, img images.Image, runtimeHandler string) (images.Image, error) {
+func (c *Client) createNewImage(ctx context.Context, img images.Image) (images.Image, error) {
 	ctx, span := tracing.StartSpan(ctx, tracing.Name(pullSpanPrefix, "pull.createNewImage"))
 	defer span.End()
 	is := c.ImageService()
