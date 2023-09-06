@@ -70,4 +70,7 @@ require (
 // IMPORTANT: this replace rule ONLY replaces containerd itself; dependencies
 // in the "require" section above are still taken into account for version
 // resolution if newer.
-replace github.com/containerd/containerd => ../../
+replace (
+	github.com/Microsoft/hcsshim => ../../../hcsshim
+	github.com/containerd/containerd => ../../
+)
