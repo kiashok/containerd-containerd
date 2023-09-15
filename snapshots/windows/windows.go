@@ -122,6 +122,14 @@ func (s *snapshotter) Stat(ctx context.Context, key string) (info snapshots.Info
 	return info, nil
 }
 
+func (s *snapshotter) GetFolderId(ctx context.Context, key string) uint64 {
+	_, si, _, err := storage.GetInfo(ctx, key)
+	if err != nil {
+		return 0
+	}
+	return si.FolderId
+}
+
 func (s *snapshotter) Update(ctx context.Context, info snapshots.Info, fieldpaths ...string) (_ snapshots.Info, err error) {
 	err = s.ms.WithTransaction(ctx, true, func(ctx context.Context) error {
 		info, err = storage.UpdateInfo(ctx, info, fieldpaths...)

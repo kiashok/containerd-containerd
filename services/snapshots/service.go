@@ -19,6 +19,7 @@ package snapshots
 import (
 	"context"
 	"errors"
+	"strconv"
 
 	snapshotsapi "github.com/containerd/containerd/api/services/snapshots/v1"
 	"github.com/containerd/containerd/api/types"
@@ -287,6 +288,7 @@ func fromKind(kind snapshots.Kind) snapshotsapi.Kind {
 }
 
 func fromInfo(info snapshots.Info) *snapshotsapi.Info {
+	info.Labels["folderId"] = strconv.FormatInt(int64(info.FolderId), 10)
 	return &snapshotsapi.Info{
 		Name:      info.Name,
 		Parent:    info.Parent,

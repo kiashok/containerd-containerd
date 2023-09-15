@@ -244,6 +244,7 @@ func (s *snapshotter) Update(ctx context.Context, info snapshots.Info, fieldpath
 func overlayInfo(info, overlay snapshots.Info) snapshots.Info {
 	// Merge info
 	info.Name = overlay.Name
+	//info.FolderId = overlay.FolderId
 	info.Created = overlay.Created
 	info.Updated = overlay.Updated
 	info.Parent = overlay.Parent
@@ -761,10 +762,14 @@ func (s *snapshotter) Walk(ctx context.Context, fn snapshots.WalkFunc, fs ...str
 					pair := infoPair{
 						bkey: string(sbkt.Get(bucketKeyName)),
 						info: snapshots.Info{
-							Name:   string(k),
+							Name: string(k),
+							//FolderId: s.Snapshotter.Stat(ctx, bkey),
+							//string(sbkt.Get(bucketKeyID)),
 							Parent: string(sbkt.Get(bucketKeyParent)),
 						},
 					}
+					sinfo, _ := s.Snapshotter.Stat(ctx, pair.bkey)
+					pair.info.FolderId = sinfo.FolderId
 
 					err := boltutil.ReadTimestamps(sbkt, &pair.info.Created, &pair.info.Updated)
 					if err != nil {

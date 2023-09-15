@@ -37,6 +37,7 @@ var (
 	bucketKeyParents        = []byte("parents")
 
 	bucketKeyID     = []byte("id")
+	bucketFolderID  = []byte("folderid")
 	bucketKeyParent = []byte("parent")
 	bucketKeyKind   = []byte("kind")
 	bucketKeyInodes = []byte("inodes")
@@ -159,13 +160,20 @@ func WalkInfo(ctx context.Context, fn snapshots.WalkFunc, fs ...string) error {
 			}
 			var (
 				sbkt = bkt.Bucket(k)
-				si   = snapshots.Info{
+				id   uint64
+				//id   = readID(sbkt)
+				si = snapshots.Info{
 					Name: string(k),
+					//FolderId: id,
 				}
 			)
-			if err := readSnapshot(sbkt, nil, &si); err != nil {
+			if id == 0 {
+				return fmt.Errorf("readID bucket() returned 0")
+			}
+			if err := readSnapshot(sbkt, &id, &si); err != nil {
 				return err
 			}
+			//si.FolderId = fmt.Sprintf("%d", id)
 			if !filter.Match(adaptSnapshot(si)) {
 				return nil
 			}
@@ -254,8 +262,9 @@ func CreateSnapshot(ctx context.Context, kind snapshots.Kind, key, parent string
 
 		t := time.Now().UTC()
 		si := snapshots.Info{
-			Parent:  parent,
-			Kind:    kind,
+			Parent: parent,
+			Kind:   kind,
+			//FolderId: "11111",
 			Labels:  base.Labels,
 			Created: t,
 			Updated: t,
@@ -521,6 +530,7 @@ func readID(bkt *bolt.Bucket) uint64 {
 func readSnapshot(bkt *bolt.Bucket, id *uint64, si *snapshots.Info) error {
 	if id != nil {
 		*id = readID(bkt)
+		si.FolderId = *id
 	}
 	if si != nil {
 		si.Kind = readKind(bkt)

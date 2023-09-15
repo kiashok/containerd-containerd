@@ -59,9 +59,41 @@ var Command = cli.Command{
 		unpackCommand,
 		usageCommand,
 		viewCommand,
+		mapCommand,
 	},
 }
 
+var mapCommand = cli.Command{
+	Name: "mapSnapshots",
+	//Aliases: []string{"ls"},
+	Usage: "map snapshots to snapshot directory",
+	Action: func(context *cli.Context) error {
+		client, ctx, cancel, err := commands.NewClient(context)
+		if err != nil {
+			return err
+		}
+		defer cancel()
+		var (
+			snapshotter = client.SnapshotService(context.GlobalString("snapshotter"))
+			tw          = tabwriter.NewWriter(os.Stdout, 1, 8, 1, ' ', 0)
+		)
+		fmt.Fprintln(tw, "KEY\tPARENT\tKIND\tFolderid\t")
+		if err := snapshotter.Walk(ctx, func(ctx gocontext.Context, info snapshots.Info) error {
+			fmt.Fprintf(tw, "%v\t%v\t%v\t%v\t\n",
+				info.Name,
+				info.Parent,
+				info.Kind,
+				info.Labels["folderId"])
+			return nil
+		}); err != nil {
+			return err
+		}
+
+		return tw.Flush()
+	},
+}
+
+// /
 var listCommand = cli.Command{
 	Name:    "list",
 	Aliases: []string{"ls"},
@@ -76,12 +108,13 @@ var listCommand = cli.Command{
 			snapshotter = client.SnapshotService(context.GlobalString("snapshotter"))
 			tw          = tabwriter.NewWriter(os.Stdout, 1, 8, 1, ' ', 0)
 		)
-		fmt.Fprintln(tw, "KEY\tPARENT\tKIND\t")
+		fmt.Fprintln(tw, "KEY\tPARENT\tKIND\tFolderid\t")
 		if err := snapshotter.Walk(ctx, func(ctx gocontext.Context, info snapshots.Info) error {
-			fmt.Fprintf(tw, "%v\t%v\t%v\t\n",
+			fmt.Fprintf(tw, "%v\t%v\t%v\t%v\t\n",
 				info.Name,
 				info.Parent,
-				info.Kind)
+				info.Kind,
+				info.Labels["folderId"])
 			return nil
 		}); err != nil {
 			return err
