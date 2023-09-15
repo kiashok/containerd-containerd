@@ -78,17 +78,18 @@ var mapCommand = cli.Command{
 			tw          = tabwriter.NewWriter(os.Stdout, 1, 8, 1, ' ', 0)
 		)
 		fmt.Fprintln(tw, "KEY\tPARENT\tKIND\tFolderid\t")
-		if err := snapshotter.Walk(ctx, func(ctx gocontext.Context, info snapshots.Info) error {
-			fmt.Fprintf(tw, "%v\t%v\t%v\t%v\t\n",
-				info.Name,
-				info.Parent,
-				info.Kind,
-				info.Labels["folderId"])
-			return nil
-		}); err != nil {
-			return err
-		}
-
+		/*
+			if err := snapshotter.Walk(ctx, func(ctx gocontext.Context, info snapshots.Info) error {
+				fmt.Fprintf(tw, "%v\t%v\t%v\t%v\t\n",
+					info.Name,
+					info.Parent,
+					info.Kind,
+					info.Labels["folderId"])
+				return nil
+			}); err != nil {
+				return err
+			}
+		*/
 		return tw.Flush()
 	},
 }
