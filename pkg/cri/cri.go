@@ -105,6 +105,8 @@ func initCRIService(ic *plugin.InitContext) (interface{}, error) {
 						return nil, fmt.Errorf("guestPlatform.OSVersion needs to be specified for windows hyperV runtimes")
 					}
 					
+					// ***TODO***: If windows OS, check if hostOSVersion and guestPlatform.OsVersion are compatible.
+					// that is, are the host and UVM compatible based on the msdocs compat matricx (mentioned in 4126  KEP).
 					platformMap[k] = platforms.Only(ociRuntime.GuestPlatform)
 					log.G(ctx).Debugf(" !! criservice.Initcrservice() for %v platformMatcher %v", k, platformMap[k])
 				} else {

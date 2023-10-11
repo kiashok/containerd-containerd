@@ -23,10 +23,11 @@ import (
 
 	"github.com/containerd/containerd/errdefs"
 	"github.com/containerd/containerd/images"
+	"github.com/containerd/containerd/labels"
+	"github.com/containerd/containerd/log"
 	"github.com/containerd/containerd/pkg/unpack"
 	"github.com/containerd/containerd/platforms"
 	"github.com/containerd/containerd/remotes"
-	"github.com/containerd/containerd/log"
 	"github.com/containerd/containerd/remotes/docker"
 	"github.com/containerd/containerd/remotes/docker/schema1" //nolint:staticcheck // Ignore SA1019. Need to keep deprecated package for compatibility.
 	"github.com/containerd/containerd/tracing"
@@ -51,7 +52,6 @@ func (c *Client) Pull(ctx context.Context, ref string, opts ...RemoteOpt) (_ Ima
 			return nil, err
 		}
 	}
-
 
 	log.G(ctx).Debugf("!! Pull(), pullctx.PlatformMatcher %v", pullCtx.PlatformMatcher)
 	log.G(ctx).Debugf("!! Pull(), pullctx.labels %v", pullCtx.Labels)
@@ -159,7 +159,7 @@ func (c *Client) Pull(ctx context.Context, ref string, opts ...RemoteOpt) (_ Ima
 		unpackSpan.End()
 	}
 
-	img, err = c.createNewImage(ctx, img)
+	img, err = c.createNewImage(ctx, img, pullCtx.RuntimeHandler)
 	if err != nil {
 		return nil, err
 	}
@@ -283,7 +283,34 @@ func (c *Client) fetch(ctx context.Context, rCtx *RemoteContext, ref string, lim
 	}, nil
 }
 
-func (c *Client) createNewImage(ctx context.Context, img images.Image) (images.Image, error) {
+/*
+	// check if image exists
+	currImg, err := is.Get(ctx, img.Name)
+	if err == nil {
+		// the image already exists. We want to check if the image has been pulled
+		// for a different runtime handler than what it is being requested for now.
+		// if it already exists for a different runtime handler, then we need to apped
+		// the current request's runtimehandelr to the exists image's runtime handler label
+		runtimeHandlerLabels = currImg.Labels[ctrdLabels.RuntimeHandlerLabel]
+
+		runtimeHandlers := strings.Split(runtimeHandlerLabels, ",")
+		// if len(runtimeHandlers) == 0 , then log error?
+		if len(runtimeHandlers) == 1 {
+			if runtimeHandler[0] != runtimeHandler {
+				img.Labels[ctrdLabels.RuntimeHandlerLabel] = img.Labels[ctrdLabels.RuntimeHandlerLabel]+","+runtimeHandler
+			}
+		} else {
+			// sort string slice and serach
+			sort.Strings(runtimeHandlers)
+			if (len(runtimeHandlers) == sort.SearchStrings(runtimeHandlers)) {
+				// this runtime handler not found, so append
+				img.Labels[ctrdLabels.RuntimeHandlerLabel] = img.Labels[ctrdLabels.RuntimeHandlerLabel]+","+runtimeHandler
+			}
+		}
+	}
+*/
+
+func (c *Client) createNewImage(ctx context.Context, img images.Image, runtimeHandler string) (images.Image, error) {
 	ctx, span := tracing.StartSpan(ctx, tracing.Name(pullSpanPrefix, "pull.createNewImage"))
 	defer span.End()
 	is := c.ImageService()
@@ -294,7 +321,22 @@ func (c *Client) createNewImage(ctx context.Context, img images.Image) (images.I
 				return images.Image{}, err
 			}
 
-			updated, err := is.Update(ctx, img)
+			var updated images.Image
+			// image already exists,  check if runtime handler exists, If it does not, we'd have to
+			// append the incoming image's runtime handler to the existing label and then call update()
+			// so that the runtime handler labels on the image are updated appropriately.
+			existingImage, err := is.Get(ctx, img.Name)
+			if existingImage.Labels[labels.RuntimeHandlerLabel] != "" {
+				newRuntimeHandlerLabel, err := labels.CheckAndAppendRuntimeHandlerLabel(existingImage.Labels[labels.RuntimeHandlerLabel], runtimeHandler)
+				if err != nil {
+					// TODO: return error
+					return images.Image{}, fmt.Errorf("label length >4096 with err %v", err)
+				}
+				// check
+				updated, err = is.Update(ctx, img, "labels."+newRuntimeHandlerLabel)
+			} else {
+				updated, err = is.Update(ctx, img)
+			}
 			if err != nil {
 				// if image was removed, try create again
 				if errdefs.IsNotFound(err) {
@@ -302,7 +344,6 @@ func (c *Client) createNewImage(ctx context.Context, img images.Image) (images.I
 				}
 				return images.Image{}, err
 			}
-
 			img = updated
 		} else {
 			img = created

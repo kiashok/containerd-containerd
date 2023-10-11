@@ -16,6 +16,13 @@
 
 package labels
 
+import (
+	"context"
+	"strings"
+
+	"github.com/containerd/containerd/log"
+)
+
 // LabelUncompressed is added to compressed layer contents.
 // The value is digest of the uncompressed content.
 const LabelUncompressed = "containerd.io/uncompressed"
@@ -29,3 +36,41 @@ const LabelSharedNamespace = "containerd.io/namespace.shareable"
 const LabelDistributionSource = "containerd.io/distribution.source"
 
 const RuntimeHandlerLabel = "containerd.io/runtimehandler"
+
+func CheckAndAppendRuntimeHandlerLabel(currentLabel string, runtimeHandler string) (string, error) {
+	// check if the label is valid
+	newRuntimeHandlerLabel := currentLabel
+	if !strings.Contains(currentLabel, runtimeHandler) {
+		newRuntimeHandlerLabel = currentLabel + "," + runtimeHandler
+	}
+
+	// The label might hit the limitation of label size, so we need to validate the length
+	if err := Validate(RuntimeHandlerLabel, newRuntimeHandlerLabel); err != nil {
+		log.G(context.Background()).Warnf("skip to append distribution label: %s", err)
+		return "", err
+	}
+
+	return newRuntimeHandlerLabel, nil
+}
+
+func CheckAndRemoveRuntimeHandlerLabel(runtimeHandlerValues []string, runtimeHandler string) (string, error) {
+	newLabel := ""
+	for _, val := range runtimeHandlerValues {
+		if val == runtimeHandler {
+			continue
+		} else {
+			if newLabel != "" {
+				newLabel = newLabel + "," + val
+			} else {
+				newLabel = val
+			}
+		}
+	}
+
+	// The label might hit the limitation of label size, so we need to validate the length
+	if err := Validate(RuntimeHandlerLabel, newLabel); err != nil {
+		log.G(context.Background()).Warnf("skip to append distribution label: %s", err)
+		return "", err
+	}
+	return newLabel, nil
+}

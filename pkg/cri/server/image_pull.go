@@ -42,10 +42,10 @@ import (
 	containerdimages "github.com/containerd/containerd/images"
 	"github.com/containerd/containerd/log"
 	//"github.com/containerd/containerd/images"
+	ctrdLabels "github.com/containerd/containerd/labels"
 	"github.com/containerd/containerd/pkg/cri/annotations"
 	criconfig "github.com/containerd/containerd/pkg/cri/config"
 	crilabels "github.com/containerd/containerd/pkg/cri/labels"
-	ctrdLabels "github.com/containerd/containerd/labels"
 	snpkg "github.com/containerd/containerd/pkg/snapshotters"
 	"github.com/containerd/containerd/remotes/docker"
 	"github.com/containerd/containerd/remotes/docker/config"
@@ -183,6 +183,7 @@ func (c *criService) PullImage(ctx context.Context, r *runtime.PullImageRequest)
 			containerd.WithUnpackDuplicationSuppressor(c.unpackDuplicationSuppressor),
 		}),
 		containerd.WithPlatformMatcher(c.platformMatcherMap[runtimeHdlr]),
+		containerd.WithRuntimeHandler(runtimeHdlr),
 	}
 
 	pullOpts = append(pullOpts, c.encryptedImagesPullOpts()...)
@@ -217,7 +218,7 @@ func (c *criService) PullImage(ctx context.Context, r *runtime.PullImageRequest)
 		if r == "" {
 			continue
 		}
-		if err := c.createImageReference(ctx, r, image.Target(), labels); err != nil {
+		if err := c.createImageReference(ctx, r, runtimeHdlr, image.Target(), labels); err != nil {
 			return nil, fmt.Errorf("failed to create image reference %q: %w", r, err)
 		}
 		// Update image store to reflect the newest state in containerd.
@@ -286,7 +287,7 @@ func ParseAuth(auth *runtime.AuthConfig, host string) (string, string, error) {
 // Note that because create and update are not finished in one transaction, there could be race. E.g.
 // the image reference is deleted by someone else after create returns already exists, but before update
 // happens.
-func (c *criService) createImageReference(ctx context.Context, name string, desc imagespec.Descriptor, labels map[string]string) error {
+func (c *criService) createImageReference(ctx context.Context, name string, runtimeHandler string, desc imagespec.Descriptor, labels map[string]string) error {
 	img := containerdimages.Image{
 		Name:   name,
 		Target: desc,
@@ -299,10 +300,29 @@ func (c *criService) createImageReference(ctx context.Context, name string, desc
 	if err == nil || !errdefs.IsAlreadyExists(err) {
 		return err
 	}
+
+	log.G(ctx).Debugf("!! createImageReference %v, err %v", oldImg, err)
+
 	if oldImg.Target.Digest == img.Target.Digest && oldImg.Labels[crilabels.ImageLabelKey] == labels[crilabels.ImageLabelKey] {
 		return nil
 	}
 
+	// image exists, so check for runtimehandler label or append new runtimehandler to update
+	// 1. get containerd image
+	existingImage, err := c.client.ImageService().Get(ctx, name)
+	if err == nil {
+		if existingImage.Labels[ctrdLabels.RuntimeHandlerLabel] != "" {
+			newRuntimeHandlerLabel, err := ctrdLabels.CheckAndAppendRuntimeHandlerLabel(existingImage.Labels[ctrdLabels.RuntimeHandlerLabel], runtimeHandler)
+			if err != nil {
+				// TODO: return error
+				return fmt.Errorf(" label length >4096 with err %v", err)
+			}
+			_, err = c.client.ImageService().Update(ctx, img, "target", "labels."+crilabels.ImageLabelKey, "labels."+newRuntimeHandlerLabel)
+			return err
+		}
+	}
+
+	// check if this new runtime handler exists and if not, append, and then pass below so that label can be updated.
 	_, err = c.client.ImageService().Update(ctx, img, "target", "labels."+crilabels.ImageLabelKey)
 	return err
 }
@@ -334,10 +354,10 @@ func (c *criService) updateImage(ctx context.Context, r string, runtimeHandler s
 		log.G(ctx).Debugf("criService.updateImage runtimeHandler was empty, default runtimehandler being used %v", runtimeHandler)
 	}
 
-	getImageOpts := []containerd.GetImageOpt {
+	getImageOpts := []containerd.GetImageOpt{
 		containerd.GetImageWithPlatformMatcher(c.platformMatcherMap[runtimeHandler]),
 	}
-	
+
 	img, err := c.client.GetImage(ctx, r, getImageOpts...)
 	log.G(ctx).Debugf(" !! criservice.updateImage call, runtimeHandler %v", runtimeHandler)
 	log.G(ctx).Debugf(" !! criservice.updateImage call, img %v", img)
@@ -353,17 +373,20 @@ func (c *criService) updateImage(ctx context.Context, r string, runtimeHandler s
 		}
 		id := configDesc.Digest.String()
 		labels := c.getLabels(ctx, id)
-		if err := c.createImageReference(ctx, id, img.Target(), labels); err != nil {
+		if err := c.createImageReference(ctx, id, runtimeHandler, img.Target(), labels); err != nil {
 			return fmt.Errorf("create image id reference %q: %w", id, err)
 		}
 		if err := c.imageStore.Update(ctx, id, runtimeHandler); err != nil {
 			return fmt.Errorf("update image store for %q: %w", id, err)
 		}
 		// The image id is ready, add the label to mark the image as managed.
-		if err := c.createImageReference(ctx, r, img.Target(), labels); err != nil {
+		if err := c.createImageReference(ctx, r, runtimeHandler, img.Target(), labels); err != nil {
 			return fmt.Errorf("create managed label: %w", err)
 		}
 	}
+	// else if image exists {
+	//update the runtime handler label below just like in createimagereference()
+
 	// If the image is not found, we should continue updating the cache,
 	// so that the image can be removed from the cache.
 	if err := c.imageStore.Update(ctx, r, runtimeHandler); err != nil {

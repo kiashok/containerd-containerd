@@ -293,7 +293,8 @@ func TestRunPodSandboxAndTeardownCNISlow(t *testing.T) {
 	assert.Equal(t, sbConfig.Metadata.Uid, sb.Metadata.Uid)
 	assert.Equal(t, sbConfig.Metadata.Attempt, sb.Metadata.Attempt)
 
-	if os.Getenv("DISABLE_CRI_SANDBOXES") != "" {
+	switch os.Getenv("ENABLE_CRI_SANDBOXES") {
+	case "":
 		// non-sbserver
 		t.Log("Get sandbox info (non-sbserver)")
 		_, info, err := SandboxInfo(sb.Id)
@@ -318,7 +319,7 @@ func TestRunPodSandboxAndTeardownCNISlow(t *testing.T) {
 		metadata, ok := i.(*sandbox.Metadata)
 		require.True(t, ok)
 		assert.Equal(t, netNS, metadata.NetNSPath, "network namespace path should be the same in runtime spec and sandbox metadata")
-	} else {
+	default:
 		// sbserver
 		t.Log("Get sandbox info (sbserver)")
 		_, info, err := sbserverSandboxInfo(sb.Id)
@@ -327,6 +328,7 @@ func TestRunPodSandboxAndTeardownCNISlow(t *testing.T) {
 
 		assert.NotEmpty(t, info.Metadata.NetNSPath, "network namespace should be set")
 	}
+
 }
 
 // sbserverSandboxInfo gets sandbox info.
