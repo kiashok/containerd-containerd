@@ -24,7 +24,6 @@ import (
 	"time"
 
 	"github.com/containerd/log"
-	"github.com/containerd/containerd/log"
 	specs "github.com/opencontainers/image-spec/specs-go/v1"
 )
 

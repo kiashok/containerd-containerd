@@ -50,7 +50,7 @@ import (
 	"github.com/containerd/containerd/labels"
 	"github.com/containerd/containerd/leases"
 	leasesproxy "github.com/containerd/containerd/leases/proxy"
-	"github.com/containerd/containerd/log"
+	"github.com/containerd/log"
 	"github.com/containerd/containerd/namespaces"
 	"github.com/containerd/containerd/pkg/dialer"
 	"github.com/containerd/containerd/platforms"

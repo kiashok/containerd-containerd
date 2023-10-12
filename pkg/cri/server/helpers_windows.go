@@ -22,7 +22,7 @@ import (
 	"path/filepath"
 	"syscall"
 
-	"github.com/containerd/containerd/log"
+	"github.com/containerd/log"
 	"github.com/opencontainers/runtime-spec/specs-go"
 	runhcsoptions "github.com/Microsoft/hcsshim/cmd/containerd-shim-runhcs-v1/options"
 )

@@ -20,7 +20,8 @@ import (
 	"context"
 	"strings"
 
-	"github.com/containerd/containerd/log"
+	"github.com/containerd/log"
+	"github.com/pkg/errors"
 )
 
 // LabelUncompressed is added to compressed layer contents.
@@ -45,9 +46,9 @@ func CheckAndAppendRuntimeHandlerLabel(currentLabel string, runtimeHandler strin
 	}
 
 	// The label might hit the limitation of label size, so we need to validate the length
-	if err := Validate(RuntimeHandlerLabel, newRuntimeHandlerLabel); err != nil {
-		log.G(context.Background()).Warnf("skip to append distribution label: %s", err)
-		return "", err
+	if err := Validate(RuntimeHandlerLabel, newRuntimeHandlerLabel); err != nil {	
+		log.G(context.Background()).Debugf("skip to append distribution label: %s", err)
+		return "", errors.Wrapf(err, "skip to append distribution label")
 	}
 
 	return newRuntimeHandlerLabel, nil
@@ -69,8 +70,8 @@ func CheckAndRemoveRuntimeHandlerLabel(runtimeHandlerValues []string, runtimeHan
 
 	// The label might hit the limitation of label size, so we need to validate the length
 	if err := Validate(RuntimeHandlerLabel, newLabel); err != nil {
-		log.G(context.Background()).Warnf("skip to append distribution label: %s", err)
-		return "", err
+	//	log.G(ctx).Debugf("skip to append distribution label: %s", err)
+		return "", errors.Wrapf(err, "skip to append distribution label")
 	}
 	return newLabel, nil
 }

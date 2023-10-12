@@ -40,7 +40,6 @@ import (
 	"github.com/containerd/containerd"
 	"github.com/containerd/containerd/errdefs"
 	containerdimages "github.com/containerd/containerd/images"
-	"github.com/containerd/containerd/log"
 	//"github.com/containerd/containerd/images"
 	ctrdLabels "github.com/containerd/containerd/labels"
 	"github.com/containerd/containerd/pkg/cri/annotations"

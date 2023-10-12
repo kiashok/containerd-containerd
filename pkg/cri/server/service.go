@@ -29,7 +29,6 @@ import (
 
 	"github.com/containerd/containerd"
 	"github.com/containerd/containerd/oci"
-	"github.com/containerd/containerd/platforms"
 	"github.com/containerd/containerd/pkg/cri/instrument"
 	"github.com/containerd/containerd/pkg/cri/nri"
 	"github.com/containerd/containerd/pkg/cri/streaming"

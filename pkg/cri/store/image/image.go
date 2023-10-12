@@ -22,12 +22,12 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/containerd/containerd"
-	"github.com/containerd/containerd/log"
+	//"github.com/containerd/containerd"
+	"github.com/containerd/containerd/content"
+	"github.com/containerd/log"
 	"github.com/containerd/containerd/errdefs"
 	"github.com/containerd/containerd/images"
 	"github.com/containerd/containerd/images/usage"
-	"github.com/containerd/containerd/platforms"
 	"github.com/containerd/containerd/pkg/cri/labels"
 	"github.com/containerd/containerd/pkg/cri/util"
 	"github.com/containerd/containerd/platforms"
@@ -113,10 +113,12 @@ func (s *Store) Update(ctx context.Context, ref string, runtimeHandler string) e
 	defer s.lock.Unlock()
 
 	log.G(ctx).Debugf("!! pkg.cri.sote Update() inage with ref %v, runtimeHdlr %v", ref, runtimeHandler)
+	/*
 	getImageOpts := []containerd.GetImageOpt{
 		containerd.GetImageWithPlatformMatcher(s.platformMatcherMap[runtimeHandler]),
 	}
-	i, err := s.images.Get(ctx, ref, getImageOpts...)
+	*/
+	i, err := s.images.Get(ctx, ref)
 	log.G(ctx).Debugf("pkg.cri.store Update(), containerd.Image is %v, err: %v", i, err)
 	if err != nil && !errdefs.IsNotFound(err) {
 		return fmt.Errorf("get image from containerd: %w", err)
