@@ -142,4 +142,4 @@ require (
 	sigs.k8s.io/yaml v1.3.0 // indirect
 )
 
-replace k8s.io/cri-api => ../../../k8s.io/kubernetes/staging/src/k8s.io/cri-api/
+replace k8s.io/cri-api => github.com/kiashok/kiashok-k8s/staging/src/k8s.io/cri-api v0.0.0-20231010193327-5de835d5d893
