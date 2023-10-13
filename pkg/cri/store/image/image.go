@@ -24,13 +24,13 @@ import (
 
 	//"github.com/containerd/containerd"
 	"github.com/containerd/containerd/content"
-	"github.com/containerd/log"
 	"github.com/containerd/containerd/errdefs"
 	"github.com/containerd/containerd/images"
 	"github.com/containerd/containerd/images/usage"
 	"github.com/containerd/containerd/pkg/cri/labels"
 	"github.com/containerd/containerd/pkg/cri/util"
 	"github.com/containerd/containerd/platforms"
+	"github.com/containerd/log"
 	docker "github.com/distribution/reference"
 
 	"github.com/opencontainers/go-digest"
@@ -61,7 +61,7 @@ type Image struct {
 	// Pinned image to prevent it from garbage collection
 	Pinned bool
 	// matchcomparer for each runtime class. For more info, see CriService struct
-	platformMatcherMap map[string]platforms.MatchComparer
+	//platformMatcherMap map[string]platforms.MatchComparer
 }
 
 // InfoProvider provides both content and info about content
@@ -95,10 +95,10 @@ type Store struct {
 // NewStore creates an image store.
 func NewStore(img images.Store, provider InfoProvider, platform platforms.MatchComparer, platformMatcherMap map[string]platforms.MatchComparer) *Store {
 	return &Store{
-		refCache: make(map[string]string),
-		images:   img,
-		provider: provider,
-		platform: platform,
+		refCache:           make(map[string]string),
+		images:             img,
+		provider:           provider,
+		platform:           platform,
 		platformMatcherMap: platformMatcherMap,
 		store: &store{
 			images:    make(map[string]Image),
@@ -114,9 +114,9 @@ func (s *Store) Update(ctx context.Context, ref string, runtimeHandler string) e
 
 	log.G(ctx).Debugf("!! pkg.cri.sote Update() inage with ref %v, runtimeHdlr %v", ref, runtimeHandler)
 	/*
-	getImageOpts := []containerd.GetImageOpt{
-		containerd.GetImageWithPlatformMatcher(s.platformMatcherMap[runtimeHandler]),
-	}
+		getImageOpts := []containerd.GetImageOpt{
+			containerd.GetImageWithPlatformMatcher(s.platformMatcherMap[runtimeHandler]),
+		}
 	*/
 	i, err := s.images.Get(ctx, ref)
 	log.G(ctx).Debugf("pkg.cri.store Update(), containerd.Image is %v, err: %v", i, err)
@@ -168,18 +168,20 @@ func (s *Store) update(ref string, img *Image, runtimeHandler string) error {
 // getImage gets image information from containerd for current platform.
 func (s *Store) getImage(ctx context.Context, i images.Image, runtimeHandler string) (*Image, error) {
 	log.G(ctx).Debugf("pkg.cri.store getImage(), containerd.Image is %v", i)
-	diffIDs, err := i.RootFS(ctx, s.provider, s.platform)
+	platform := s.platformMatcherMap[runtimeHandler]
+
+	diffIDs, err := i.RootFS(ctx, s.provider, platform)
 	if err != nil {
 		return nil, fmt.Errorf("get image diffIDs: %w", err)
 	}
 	chainID := imageidentity.ChainID(diffIDs)
 
-	size, err := usage.CalculateImageUsage(ctx, i, s.provider, usage.WithManifestLimit(s.platform, 1), usage.WithManifestUsage())
+	size, err := usage.CalculateImageUsage(ctx, i, s.provider, usage.WithManifestLimit(platform, 1), usage.WithManifestUsage())
 	if err != nil {
 		return nil, fmt.Errorf("get image compressed resource size: %w", err)
 	}
 
-	desc, err := i.Config(ctx, s.provider, s.platform)
+	desc, err := i.Config(ctx, s.provider, platform)
 	if err != nil {
 		return nil, fmt.Errorf("get image config descriptor: %w", err)
 	}
@@ -198,13 +200,14 @@ func (s *Store) getImage(ctx context.Context, i images.Image, runtimeHandler str
 	pinned := i.Labels[labels.PinnedImageLabelKey] == labels.PinnedImageLabelValue
 
 	return &Image{
-		ID:         id,
-		References: []string{i.Name},
+		ID:             id,
+		References:     []string{i.Name},
 		RuntimeHandler: runtimeHandler,
-		ChainID:    chainID.String(),
-		Size:       size,
-		ImageSpec:  spec,
-		Pinned:     pinned,
+		//	platformMatcherMap: s.platformMatcherMap,
+		ChainID:   chainID.String(),
+		Size:      size,
+		ImageSpec: spec,
+		Pinned:    pinned,
 	}, nil
 
 }
