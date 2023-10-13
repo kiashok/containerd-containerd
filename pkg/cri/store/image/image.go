@@ -83,7 +83,7 @@ type Store struct {
 
 	// platform represents the currently supported platform for images
 	// TODO: Make this store multi-platform
-	platform platforms.MatchComparer
+	//????? platform platforms.MatchComparer
 
 	// matchcomparer for each runtime class. For more info, see CriService struct
 	platformMatcherMap map[string]platforms.MatchComparer
@@ -95,10 +95,10 @@ type Store struct {
 // NewStore creates an image store.
 func NewStore(img images.Store, provider InfoProvider, platform platforms.MatchComparer, platformMatcherMap map[string]platforms.MatchComparer) *Store {
 	return &Store{
-		refCache:           make(map[string]string),
-		images:             img,
-		provider:           provider,
-		platform:           platform,
+		refCache: make(map[string]string),
+		images:   img,
+		provider: provider,
+		//	platform:           platform,
 		platformMatcherMap: platformMatcherMap,
 		store: &store{
 			images:    make(map[string]Image),
