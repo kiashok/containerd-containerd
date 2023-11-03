@@ -17,9 +17,12 @@
 package netns
 
 import (
+	"context"
 	"errors"
 
+	"github.com/Microsoft/hcsshim"
 	"github.com/Microsoft/hcsshim/hcn"
+	"github.com/containerd/containerd/log"
 )
 
 var errNotImplementedOnWindows = errors.New("not implemented on windows")
@@ -32,6 +35,21 @@ type NetNS struct {
 // NewNetNS creates a network namespace for the sandbox.
 func NewNetNS(baseDir string) (*NetNS, error) {
 	temp := hcn.HostComputeNamespace{}
+
+	// Set ReadyOnCreate to true if HNS version >= 15.2 or 13.4 .
+	// These versions of HNS change how network compartments are
+	// initialized and depend on ReadyOnCreate field for the same.
+	// These changes on HNS side were mostly made to support removal
+	// of pause containers for windows process isolated scenarios.
+	hnsGlobals, err := hcsshim.GetHNSGlobals()
+	if err == nil {
+		if (hnsGlobals.Version.Major > 15) ||
+			(hnsGlobals.Version.Major == 15 && hnsGlobals.Version.Minor >= 2) ||
+			(hnsGlobals.Version.Major == 13 && hnsGlobals.Version.Minor >= 4) {
+			temp.ReadyOnCreate = true
+		}
+	}
+	log.G(context.Background()).Debugf("NewNetNS(), value of HostComputeNamespace.ReadyOnCreate() is %v", temp.ReadyOnCreate)
 	hcnNamespace, err := temp.Create()
 	if err != nil {
 		return nil, err
