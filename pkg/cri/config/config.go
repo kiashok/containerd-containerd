@@ -24,10 +24,11 @@ import (
 	"time"
 
 	"github.com/containerd/log"
-	runtime "k8s.io/cri-api/pkg/apis/runtime/v1"
+	specs "github.com/opencontainers/image-spec/specs-go/v1"
 
 	"github.com/containerd/containerd/v2/pkg/cri/annotations"
 	"github.com/containerd/containerd/v2/pkg/deprecation"
+	runtime "k8s.io/cri-api/pkg/apis/runtime/v1"
 )
 
 const (
@@ -107,6 +108,8 @@ type Runtime struct {
 	// shim - means use whatever Controller implementation provided by shim (e.g. use RemoteController).
 	// podsandbox - means use Controller implementation from sbserver podsandbox package.
 	Sandboxer string `toml:"sandboxer" json:"sandboxer"`
+	// GuestPlatform defines the guest that VM based containers are intended to run within.
+	GuestPlatform specs.Platform `toml:"guest_platform" json:"guestPlatform"`
 }
 
 // ContainerdConfig contains toml config related to containerd
