@@ -26,6 +26,7 @@ import (
 
 	"github.com/containerd/containerd/v2/errdefs"
 	"github.com/containerd/containerd/v2/images"
+	ctrdlabels "github.com/containerd/containerd/v2/labels"
 	"github.com/containerd/containerd/v2/pkg/unpack"
 	"github.com/containerd/containerd/v2/platforms"
 	"github.com/containerd/containerd/v2/remotes"
@@ -154,7 +155,7 @@ func (c *Client) Pull(ctx context.Context, ref string, opts ...RemoteOpt) (_ Ima
 		unpackSpan.End()
 	}
 
-	img, err = c.createNewImage(ctx, img)
+	img, err = c.createNewImage(ctx, img, pullCtx.RuntimeHandler)
 	if err != nil {
 		return nil, err
 	}
@@ -288,7 +289,7 @@ func (c *Client) fetch(ctx context.Context, rCtx *RemoteContext, ref string, lim
 	}, nil
 }
 
-func (c *Client) createNewImage(ctx context.Context, img images.Image) (images.Image, error) {
+func (c *Client) createNewImage(ctx context.Context, img images.Image, runtimeHandler string) (images.Image, error) {
 	ctx, span := tracing.StartSpan(ctx, tracing.Name(pullSpanPrefix, "pull.createNewImage"))
 	defer span.End()
 	is := c.ImageService()
@@ -298,7 +299,29 @@ func (c *Client) createNewImage(ctx context.Context, img images.Image) (images.I
 				return images.Image{}, err
 			}
 
-			updated, err := is.Update(ctx, img)
+			// At this point, it means that the image already exists, so we want
+			// to update the runtimeHandler for the image pull request coming in
+			//var err error
+			//var updated images.Image
+			/*
+				existingImage, err := is.Get(ctx, img.Name)
+				if err != nil {
+					// if image was removed, try create again
+					if errdefs.IsNotFound(err) {
+						continue
+					}
+					return images.Image{}, err
+				}
+
+				runtimeHandlerLabelKey := fmt.Sprintf(ctrdlabels.RuntimeHandlerLabelFormat, ctrdlabels.RuntimeHandlerLabelPrefix, runtimeHandler)
+				if existingImage.Labels[runtimeHandlerLabelKey] == "" {
+					updated, err = is.Update(ctx, img, "labels."+runtimeHandlerLabelKey)
+				} else {
+					updated, err = is.Update(ctx, img)
+				}
+			*/
+			runtimeHandlerLabelKey := fmt.Sprintf(ctrdlabels.RuntimeHandlerLabelFormat, ctrdlabels.RuntimeHandlerLabelPrefix, runtimeHandler)
+			updated, err := is.Update(ctx, img, "labels."+runtimeHandlerLabelKey)
 			if err != nil {
 				// if image was removed, try create again
 				if errdefs.IsNotFound(err) {

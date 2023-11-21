@@ -22,6 +22,8 @@ import (
 	"path/filepath"
 	"syscall"
 
+	runhcsoptions "github.com/Microsoft/hcsshim/cmd/containerd-shim-runhcs-v1/options"
+	"github.com/containerd/log"
 	"github.com/opencontainers/runtime-spec/specs-go"
 )
 
@@ -171,5 +173,18 @@ func modifyProcessLabel(runtimeType string, spec *specs.Spec) error {
 }
 
 func isUnifiedCgroupsMode() bool {
+	return false
+}
+
+func IsWindowsSandboxIsolation(ctx context.Context, runtimeOpts interface{}) bool {
+	rhcso, ok := runtimeOpts.(*runhcsoptions.Options)
+	if ok {
+		if rhcso.SandboxIsolation == 1 { // hyperV isolated
+			return true
+		}
+	} else {
+		// log error
+		log.G(ctx).Errorf("Failed to get runhcs runtime options")
+	}
 	return false
 }

@@ -364,6 +364,9 @@ type RemoteContext struct {
 	// preference.
 	Platforms []string
 
+	// Runtime handler used to pull the image
+	RuntimeHandler string
+
 	// MaxConcurrentDownloads is the max concurrent content downloads for each pull.
 	MaxConcurrentDownloads int
 
@@ -421,7 +424,7 @@ func (c *Client) Fetch(ctx context.Context, ref string, opts ...RemoteOpt) (imag
 	if err != nil {
 		return images.Image{}, err
 	}
-	return c.createNewImage(ctx, img)
+	return c.createNewImage(ctx, img, fetchCtx.RuntimeHandler) // TODO kiashok: Test! Called from cmd/ctr and integration/client tests
 }
 
 // Push uploads the provided content to a remote resource

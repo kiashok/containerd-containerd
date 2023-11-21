@@ -49,16 +49,20 @@ type CRIImageService struct {
 	// one in-flight fetch request or unpack handler for a given descriptor's
 	// or chain ID.
 	unpackDuplicationSuppressor kmutex.KeyedLocker
+	// initializes matchComparer for each runtime handler using the default platform or
+	// GuestPlatform defined for the runtime handler (see pkg/cri/config/config.go).
+	platformMatcherMap map[string]platforms.MatchComparer
 }
 
-func NewService(config criconfig.Config, imageFSPaths map[string]string, client *containerd.Client) (*CRIImageService, error) {
+func NewService(config criconfig.Config, imageFSPaths map[string]string, client *containerd.Client, platformMatchComparerMap map[string]platforms.MatchComparer) (*CRIImageService, error) {
 	svc := CRIImageService{
 		config:                      config,
 		client:                      client,
-		imageStore:                  imagestore.NewStore(client.ImageService(), client.ContentStore(), platforms.Default()),
+		imageStore:                  imagestore.NewStore(client.ImageService(), client.ContentStore(), platforms.Default(), platformMatchComparerMap),
 		imageFSPaths:                imageFSPaths,
 		snapshotStore:               snapshotstore.NewStore(),
 		unpackDuplicationSuppressor: kmutex.New(),
+		platformMatcherMap:          platformMatchComparerMap,
 	}
 
 	snapshotters := map[string]snapshot.Snapshotter{}

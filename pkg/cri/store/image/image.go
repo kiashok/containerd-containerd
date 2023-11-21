@@ -39,11 +39,16 @@ import (
 	imagespec "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
+// name-runtimehandler
+const imageKeyFormat = "%s:%s"
+
 // Image contains all resources associated with the image. All fields
 // MUST not be mutated directly after created.
 type Image struct {
 	// Id of the image. Normally the digest of image config.
 	ID string
+	// runtime handler used to pull this image.
+	RuntimeHandler string
 	// References are references to the image, e.g. RepoTag and RepoDigest.
 	References []string
 	// ChainID is the chainID of the image.
@@ -78,17 +83,21 @@ type Store struct {
 	// TODO: Make this store multi-platform
 	platform platforms.MatchComparer
 
+	// matchcomparer for each runtime class. For more info, see CriService struct
+	platformMatcherMap map[string]platforms.MatchComparer
+
 	// store is the internal image store indexed by image id.
 	store *store
 }
 
 // NewStore creates an image store.
-func NewStore(img images.Store, provider InfoProvider, platform platforms.MatchComparer) *Store {
+func NewStore(img images.Store, provider InfoProvider, platform platforms.MatchComparer, platformMatcherMap map[string]platforms.MatchComparer) *Store {
 	return &Store{
-		refCache: make(map[string]string),
-		images:   img,
-		provider: provider,
-		platform: platform,
+		refCache:           make(map[string]string),
+		images:             img,
+		provider:           provider,
+		platform:           platform,
+		platformMatcherMap: platformMatcherMap,
 		store: &store{
 			images:     make(map[string]Image),
 			digestSet:  digestset.NewSet(),
@@ -98,7 +107,7 @@ func NewStore(img images.Store, provider InfoProvider, platform platforms.MatchC
 }
 
 // Update updates cache for a reference.
-func (s *Store) Update(ctx context.Context, ref string) error {
+func (s *Store) Update(ctx context.Context, ref string, runtimeHandler string) error {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
@@ -109,7 +118,7 @@ func (s *Store) Update(ctx context.Context, ref string) error {
 
 	var img *Image
 	if err == nil {
-		img, err = s.getImage(ctx, i)
+		img, err = s.getImage(ctx, i, runtimeHandler)
 		if err != nil {
 			return fmt.Errorf("get image info from containerd: %w", err)
 		}
@@ -149,19 +158,21 @@ func (s *Store) update(ref string, img *Image) error {
 }
 
 // getImage gets image information from containerd for current platform.
-func (s *Store) getImage(ctx context.Context, i images.Image) (*Image, error) {
-	diffIDs, err := i.RootFS(ctx, s.provider, s.platform)
+func (s *Store) getImage(ctx context.Context, i images.Image, runtimeHandler string) (*Image, error) {
+	// get platform matcher for the runtime handler used to pull this image
+	platform := s.platformMatcherMap[runtimeHandler]
+	diffIDs, err := i.RootFS(ctx, s.provider, platform)
 	if err != nil {
 		return nil, fmt.Errorf("get image diffIDs: %w", err)
 	}
 	chainID := imageidentity.ChainID(diffIDs)
 
-	size, err := usage.CalculateImageUsage(ctx, i, s.provider, usage.WithManifestLimit(s.platform, 1), usage.WithManifestUsage())
+	size, err := usage.CalculateImageUsage(ctx, i, s.provider, usage.WithManifestLimit(platform, 1), usage.WithManifestUsage())
 	if err != nil {
 		return nil, fmt.Errorf("get image compressed resource size: %w", err)
 	}
 
-	desc, err := i.Config(ctx, s.provider, s.platform)
+	desc, err := i.Config(ctx, s.provider, platform)
 	if err != nil {
 		return nil, fmt.Errorf("get image config descriptor: %w", err)
 	}
@@ -180,12 +191,13 @@ func (s *Store) getImage(ctx context.Context, i images.Image) (*Image, error) {
 	pinned := i.Labels[labels.PinnedImageLabelKey] == labels.PinnedImageLabelValue
 
 	return &Image{
-		ID:         id,
-		References: []string{i.Name},
-		ChainID:    chainID.String(),
-		Size:       size,
-		ImageSpec:  spec,
-		Pinned:     pinned,
+		ID:             id,
+		RuntimeHandler: runtimeHandler,
+		References:     []string{i.Name},
+		ChainID:        chainID.String(),
+		Size:           size,
+		ImageSpec:      spec,
+		Pinned:         pinned,
 	}, nil
 
 }

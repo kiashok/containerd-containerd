@@ -17,6 +17,7 @@
 package cri
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"path/filepath"
@@ -99,7 +100,14 @@ func initCRIService(ic *plugin.InitContext) (interface{}, error) {
 		return nil, fmt.Errorf("failed to create containerd client: %w", err)
 	}
 
-	s, err := server.NewCRIService(c, client, getNRIAPI(ic))
+	// initialize matchComparer for each runtime handler defined in containerd toml
+	platformMap := make(map[string]platforms.MatchComparer)
+	err = initializePlatformMatcherMap(ctx, c, platformMap)
+	if err != nil {
+		return nil, err
+	}
+
+	s, err := server.NewCRIService(c, client, platformMap, getNRIAPI(ic))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create CRI service: %w", err)
 	}
@@ -114,6 +122,55 @@ func initCRIService(ic *plugin.InitContext) (interface{}, error) {
 	}()
 
 	return s, nil
+}
+
+func initializePlatformMatcherMap(ctx context.Context, c criconfig.Config, platformMap map[string]platforms.MatchComparer) error {
+	for k, ociRuntime := range c.PluginConfig.ContainerdConfig.Runtimes {
+		// consider guestPlatform values only if OS and Architecture are specified
+		if ociRuntime.GuestPlatform.OS != "" && ociRuntime.GuestPlatform.Architecture != "" {
+			// For windows: check if the runtime handler has sandbox isolation field set and use
+			// guestplatform for platform matcher only for hyperV isolated runtime handlers.
+			// Process isolated containers run direclty on the host and hence only the default platform
+			// matcher of the host needs to used. If guestPlatform was defined for process isolated
+			// runtime handlers, it would be better to explicitly throw an error here so that user can
+			// remove guestPlatform field for this runtime handler from the toml
+			if ociRuntime.Type == server.RuntimeRunhcsV1 {
+				platformMatchComparer, err := getWindowsGuestPlatformMatcher(ctx, ociRuntime, k)
+				if err != nil {
+					return fmt.Errorf("failed to init platformMap: %w", err)
+				}
+				platformMap[k] = platformMatchComparer
+			} else {
+				platformMap[k] = platforms.Only(ociRuntime.GuestPlatform)
+			}
+		} else {
+			platformMap[k] = platforms.Only(platforms.DefaultSpec())
+		}
+	}
+	return nil
+}
+
+func getWindowsGuestPlatformMatcher(ctx context.Context, ociRuntime criconfig.Runtime, runtimeHandler string) (platforms.MatchComparer, error) {
+	runtimeOpts, err := server.GenerateRuntimeOptions(ociRuntime)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to get runtime options for runtime: %v", runtimeHandler)
+	}
+	if server.IsWindowsSandboxIsolation(ctx, runtimeOpts) {
+		// ensure that OSVersion is mentioned for windows runtime handlers
+		if ociRuntime.GuestPlatform.OSVersion == "" {
+			return nil, fmt.Errorf("guestPlatform.OSVersion needs to be specified")
+		}
+
+		// ***TODO***: If windows OS, check if hostOSVersion and guestPlatform.OsVersion are compatible.
+		// that is, are the host and UVM compatible based on the msdocs compat matricx (mentioned in 4126  KEP).
+		isCompat := platforms.AreHostAndGuestHyperVCompatible(platforms.DefaultSpec(), ociRuntime.GuestPlatform)
+		if !isCompat {
+			return nil, fmt.Errorf("incompatible host and guest OSVersions")
+		}
+		return platforms.Only(ociRuntime.GuestPlatform), nil
+	} else {
+		return nil, fmt.Errorf("GuestPlatform cannot override the host platform for process isolation")
+	}
 }
 
 // Set glog level.

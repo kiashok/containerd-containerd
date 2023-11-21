@@ -48,6 +48,7 @@ import (
 	ctrdutil "github.com/containerd/containerd/v2/pkg/cri/util"
 	osinterface "github.com/containerd/containerd/v2/pkg/os"
 	"github.com/containerd/containerd/v2/pkg/registrar"
+	"github.com/containerd/containerd/v2/platforms"
 	"github.com/containerd/containerd/v2/plugins"
 	"github.com/containerd/containerd/v2/sandbox"
 )
@@ -77,7 +78,7 @@ type imageService interface {
 
 	RuntimeSnapshotter(ctx context.Context, ociRuntime criconfig.Runtime) string
 
-	UpdateImage(ctx context.Context, r string) error
+	UpdateImage(ctx context.Context, r string, runtimeHandler string) error
 
 	GetImage(id string) (imagestore.Image, error)
 	GetSnapshot(key, snapshotter string) (snapshotstore.Snapshot, error)
@@ -108,6 +109,9 @@ type criService struct {
 	netPlugin map[string]cni.CNI
 	// client is an instance of the containerd client
 	client *containerd.Client
+	// initializes matchComparer for each runtime handler using the default platform or
+	// GuestPlatform defined for the runtime handler (see pkg/cri/config/config.go).
+	platformMatcherMap map[string]platforms.MatchComparer
 	// streamServer is the streaming server serves container streaming request.
 	streamServer streaming.Server
 	// eventMonitor is the monitor monitors containerd events.
@@ -133,7 +137,7 @@ type criService struct {
 }
 
 // NewCRIService returns a new instance of CRIService
-func NewCRIService(config criconfig.Config, client *containerd.Client, nri *nri.API) (CRIService, error) {
+func NewCRIService(config criconfig.Config, client *containerd.Client, platformMatchComparerMap map[string]platforms.MatchComparer, nri *nri.API) (CRIService, error) {
 	var err error
 	labels := label.NewStore()
 
@@ -156,7 +160,7 @@ func NewCRIService(config criconfig.Config, client *containerd.Client, nri *nri.
 	log.L.Infof("Get image filesystem path %q for snapshotter %q", imageFSPaths[snapshotter], snapshotter)
 
 	// TODO: expose this as a separate containerd plugin.
-	imageService, err := images.NewService(config, imageFSPaths, client)
+	imageService, err := images.NewService(config, imageFSPaths, client, platformMatchComparerMap)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create CRI image service: %w", err)
 	}

@@ -274,7 +274,9 @@ func (s *fakeImageService) RuntimeSnapshotter(ctx context.Context, ociRuntime cr
 	return ""
 }
 
-func (s *fakeImageService) UpdateImage(ctx context.Context, r string) error { return nil }
+func (s *fakeImageService) UpdateImage(ctx context.Context, r string, runtimeHandler string) error {
+	return nil
+}
 
 func (s *fakeImageService) GetImage(id string) (imagestore.Image, error) { return s.imageStore.Get(id) }
 

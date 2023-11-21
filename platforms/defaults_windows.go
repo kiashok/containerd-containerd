@@ -39,6 +39,11 @@ func DefaultSpec() specs.Platform {
 	}
 }
 
+func AreHostAndGuestHyperVCompatible(hostPlatform, guestPlatform specs.Platform) bool {
+	// Need to implement
+	return true
+}
+
 type windowsmatcher struct {
 	specs.Platform
 	osVersionPrefix string
