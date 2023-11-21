@@ -1,3 +1,5 @@
+# cloud.google.com/go/compute v1.23.0
+## explicit; go 1.19
 # dario.cat/mergo v1.0.0
 ## explicit; go 1.13
 dario.cat/mergo
@@ -225,7 +227,7 @@ github.com/golang/protobuf/ptypes
 github.com/golang/protobuf/ptypes/any
 github.com/golang/protobuf/ptypes/duration
 github.com/golang/protobuf/ptypes/timestamp
-# github.com/google/go-cmp v0.5.9
+# github.com/google/go-cmp v0.6.0
 ## explicit; go 1.13
 github.com/google/go-cmp/cmp
 github.com/google/go-cmp/cmp/internal/diff
@@ -535,12 +537,10 @@ google.golang.org/appengine/internal/log
 google.golang.org/appengine/internal/remote_api
 google.golang.org/appengine/internal/urlfetch
 google.golang.org/appengine/urlfetch
-# google.golang.org/genproto v0.0.0-20230720185612-659f7aaaa771
-## explicit; go 1.19
 # google.golang.org/genproto/googleapis/api v0.0.0-20230726155614-23370e0ffb3e
 ## explicit; go 1.19
 google.golang.org/genproto/googleapis/api/httpbody
-# google.golang.org/genproto/googleapis/rpc v0.0.0-20230726155614-23370e0ffb3e
+# google.golang.org/genproto/googleapis/rpc v0.0.0-20230822172742-b8732ec3820d
 ## explicit; go 1.19
 google.golang.org/genproto/googleapis/rpc/code
 google.golang.org/genproto/googleapis/rpc/errdetails
@@ -720,8 +720,8 @@ k8s.io/client-go/util/workqueue
 # k8s.io/component-base v0.28.2
 ## explicit; go 1.20
 k8s.io/component-base/logs/logreduction
-# k8s.io/cri-api v0.28.2
-## explicit; go 1.20
+# k8s.io/cri-api v0.29.0-alpha.3
+## explicit; go 1.21.3
 k8s.io/cri-api/pkg/apis/runtime/v1
 # k8s.io/klog/v2 v2.100.1
 ## explicit; go 1.13
