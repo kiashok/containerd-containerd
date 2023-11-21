@@ -129,7 +129,7 @@ func (c *criService) portForward(ctx context.Context, id string, port int32, str
 	if err != nil {
 		return fmt.Errorf("failed to execute portforward in network namespace %q: %w", netNSPath, err)
 	}
-	log.G(ctx).Infof("Finish port forwarding for %q port %d", id, port)
+	log.G(ctx).Infof("Finish port forwarding for linux %q port %d", id, port)
 
 	return nil
 }

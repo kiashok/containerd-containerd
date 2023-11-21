@@ -46,34 +46,26 @@ func (c *criService) portForward(ctx context.Context, id string, port int32, str
 */
 
 func (c *criService) portForward(ctx context.Context, id string, port int32, stream io.ReadWriter) error {
-	//	stdout := cioutil.NewNopWriteCloser(stream)
-	//	stderrBuffer := new(bytes.Buffer)
-	//	stderr := cioutil.NewNopWriteCloser(stderrBuffer)
-	/*
-		// localhost is resolved to 127.0.0.1 in ipv4, and ::1 in ipv6.
-		// Explicitly using ipv4 IP address in here to avoid flakiness.
-		cmd := []string{"wincat.exe", "127.0.0.1", fmt.Sprint(port)}
-		err := c.execInSandbox(ctx, id, cmd, stream, stdout, stderr)
-		if err != nil {
-			return fmt.Errorf("failed to execute port forward in sandbox: %s: %w", stderrBuffer.String(), err)
-		}
-	*/
-
 	sandbox, err := c.sandboxStore.Get(id)
 	if err != nil {
 		return fmt.Errorf("failed to find sandbox %q in store: %w", id, err)
 	}
 
+	log.G(ctx).Infof("!!! In windows sandbox port forwarding for podId %v, port %v, sandbox %v", id, port, sandbox)
+
 	var podIP string
+	var additionalIPs []string
 	if !hostNetwork(sandbox.Config) {
 		// get ip address of the sandbox
-		podIP /* additionalIPs */, _, err = c.getIPs(sandbox)
+		podIP, additionalIPs, err = c.getIPs(sandbox)
 		if err != nil {
 			return fmt.Errorf("failed to get sandbox ip: %w", err)
 		}
 	} else {
 		// for host network containers you can directly do dial on the host itself right?
 	}
+
+	log.G(ctx).Infof("!!! podIp %v, additionalIPs %v", podIP, additionalIPs)
 
 	err = func() error {
 		var conn net.Conn
@@ -84,6 +76,8 @@ func (c *criService) portForward(ctx context.Context, id string, port int32, str
 			if errV6 != nil {
 				return fmt.Errorf("failed to connect to %s:%d inside namespace %q, IPv4: %v IPv6 %v ", podIP, port, id, err, errV6)
 			}
+		} else {
+			log.G(ctx).Infof("Connection to ip %s and port %d was successful", podIP, port)
 		}
 		defer conn.Close()
 
@@ -92,14 +86,14 @@ func (c *criService) portForward(ctx context.Context, id string, port int32, str
 		errCh := make(chan error, 2)
 		// Copy from the namespace port connection to the client stream
 		go func() {
-			log.G(ctx).Debugf("PortForward copying data from namespace %q port %d to the client stream", id, port)
+			log.G(ctx).Infof("PortForward copying data from namespace %q port %d to the client stream", id, port)
 			_, err := io.Copy(stream, conn)
 			errCh <- err
 		}()
 
 		// Copy from the client stream to the namespace port connection
 		go func() {
-			log.G(ctx).Debugf("PortForward copying data from client stream to namespace %q port %d", id, port)
+			log.G(ctx).Infof("PortForward copying data from client stream to namespace %q port %d", id, port)
 			_, err := io.Copy(conn, stream)
 			errCh <- err
 		}()
@@ -110,35 +104,35 @@ func (c *criService) portForward(ctx context.Context, id string, port int32, str
 		var errFwd error
 		select {
 		case errFwd = <-errCh:
-			log.G(ctx).Debugf("PortForward stop forwarding in one direction in network namespace %q port %d: %v", id, port, errFwd)
+			log.G(ctx).Infof("PortForward stop forwarding in one direction in network namespace %q port %d: %v", id, port, errFwd)
 		case <-ctx.Done():
-			log.G(ctx).Debugf("PortForward cancelled in network namespace %q port %d: %v", id, port, ctx.Err())
+			log.G(ctx).Infof("PortForward cancelled in network namespace %q port %d: %v", id, port, ctx.Err())
 			return ctx.Err()
 		}
 		// give a chance to terminate gracefully or timeout
 		// after 1s
-		// https://linux.die.net/man/1/socat
 		const timeout = time.Second
 		select {
 		case e := <-errCh:
 			if errFwd == nil {
 				errFwd = e
 			}
-			log.G(ctx).Debugf("PortForward stopped forwarding in both directions in network namespace %q port %d: %v", id, port, e)
+			log.G(ctx).Infof("PortForward stopped forwarding in both directions in network namespace %q port %d: %v", id, port, e)
 		case <-time.After(timeout):
-			log.G(ctx).Debugf("PortForward timed out waiting to close the connection in network namespace %q port %d", id, port)
+			log.G(ctx).Infof("PortForward timed out waiting to close the connection in network namespace %q port %d", id, port)
 		case <-ctx.Done():
-			log.G(ctx).Debugf("PortForward cancelled in network namespace %q port %d: %v", id, port, ctx.Err())
+			log.G(ctx).Infof("PortForward cancelled in network namespace %q port %d: %v", id, port, ctx.Err())
 			errFwd = ctx.Err()
 		}
 
+		log.G(ctx).Infof("!! port forwarding returning errFwd  %v", errFwd)
 		return errFwd
 	}()
 
 	if err != nil {
 		return fmt.Errorf("failed to execute portforward for podId %v, podIp %v, err: %w", id, podIP, err)
 	}
-	log.G(ctx).Infof("Finish port forwarding for %q port %d", id, port)
+	log.G(ctx).Infof("Finish port forwarding for windows %q port %d", id, port)
 
 	return nil
 }
