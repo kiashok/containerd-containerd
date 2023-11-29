@@ -152,7 +152,7 @@ func (c *Client) Import(ctx context.Context, reader io.Reader, opts ...ImportOpt
 			Target: index,
 		})
 	}
-	var platformMatcher = c.platform
+	var platformMatcher = c.defaultPlatform
 	if iopts.allPlatforms {
 		platformMatcher = platforms.All
 	} else if iopts.platformMatcher != nil {

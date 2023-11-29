@@ -104,9 +104,9 @@ func New(address string, opts ...Opt) (*Client, error) {
 	}
 
 	if copts.defaultPlatform != nil {
-		c.platform = copts.defaultPlatform
+		c.defaultPlatform = copts.defaultPlatform
 	} else {
-		c.platform = platforms.Default()
+		c.defaultPlatform = platforms.Default()
 	}
 
 	if copts.services != nil {
@@ -188,9 +188,9 @@ func NewWithConn(conn *grpc.ClientConn, opts ...Opt) (*Client, error) {
 	}
 
 	if copts.defaultPlatform != nil {
-		c.platform = copts.defaultPlatform
+		c.defaultPlatform = copts.defaultPlatform
 	} else {
-		c.platform = platforms.Default()
+		c.defaultPlatform = platforms.Default()
 	}
 
 	// check namespace labels for default runtime
@@ -212,12 +212,12 @@ func NewWithConn(conn *grpc.ClientConn, opts ...Opt) (*Client, error) {
 // using a uniform interface
 type Client struct {
 	services
-	connMu    sync.Mutex
-	conn      *grpc.ClientConn
-	runtime   string
-	defaultns string
-	platform  platforms.MatchComparer
-	connector func() (*grpc.ClientConn, error)
+	connMu          sync.Mutex
+	conn            *grpc.ClientConn
+	runtime         string
+	defaultns       string
+	defaultPlatform platforms.MatchComparer
+	connector       func() (*grpc.ClientConn, error)
 }
 
 // Reconnect re-establishes the GRPC connection to the containerd daemon

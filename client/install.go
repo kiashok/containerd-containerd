@@ -45,7 +45,7 @@ func (c *Client) Install(ctx context.Context, image Image, opts ...InstallOpts) 
 	}
 	var (
 		cs       = image.ContentStore()
-		platform = c.platform
+		platform = c.defaultPlatform
 	)
 	manifest, err := images.Manifest(ctx, cs, image.Target(), platform)
 	if err != nil {

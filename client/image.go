@@ -118,7 +118,7 @@ func NewImage(client *Client, i images.Image) Image {
 	return &image{
 		client:   client,
 		i:        i,
-		platform: client.platform,
+		platform: client.defaultPlatform,
 	}
 }
 
