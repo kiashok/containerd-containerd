@@ -183,6 +183,8 @@ func (c *CRIImageService) PullImage(ctx context.Context, r *runtime.PullImageReq
 		containerd.WithUnpackOpts([]containerd.UnpackOpt{
 			containerd.WithUnpackDuplicationSuppressor(c.unpackDuplicationSuppressor),
 		}),
+		containerd.WithPlatformMatcher(c.client.GetPlatformMatcherForRuntimeHandler(runtimeHdlr)),
+		containerd.WithRuntimeHandler(runtimeHdlr),
 	}
 
 	// Temporarily removed for v2 upgrade
