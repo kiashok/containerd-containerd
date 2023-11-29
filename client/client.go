@@ -103,6 +103,12 @@ func New(address string, opts ...Opt) (*Client, error) {
 		c.runtime = defaults.DefaultRuntime
 	}
 
+	if copts.platformMatcherMap != nil {
+		c.platformMatcherMap = copts.platformMatcherMap
+	} else {
+		return nil, fmt.Errorf("platformMatcher map not set")
+	}
+
 	if copts.defaultPlatform != nil {
 		c.defaultPlatform = copts.defaultPlatform
 	} else {
@@ -217,7 +223,14 @@ type Client struct {
 	runtime         string
 	defaultns       string
 	defaultPlatform platforms.MatchComparer
-	connector       func() (*grpc.ClientConn, error)
+	// initializes matchComparer for each runtime handler using the default platform or
+	// GuestPlatform defined for the runtime handler (see pkg/cri/config/config.go).
+	platformMatcherMap map[string]platforms.MatchComparer
+	connector          func() (*grpc.ClientConn, error)
+}
+
+func (c *Client) GetPlatformMatcherForRuntimeHandler(runtimeHandler string) platforms.MatchComparer {
+	return c.platformMatcherMap[runtimeHandler]
 }
 
 // Reconnect re-establishes the GRPC connection to the containerd daemon

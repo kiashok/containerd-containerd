@@ -29,13 +29,14 @@ import (
 )
 
 type clientOpts struct {
-	defaultns       string
-	defaultRuntime  string
-	defaultPlatform platforms.MatchComparer
-	services        *services
-	dialOptions     []grpc.DialOption
-	callOptions     []grpc.CallOption
-	timeout         time.Duration
+	defaultns          string
+	defaultRuntime     string
+	defaultPlatform    platforms.MatchComparer
+	platformMatcherMap map[string]platforms.MatchComparer
+	services           *services
+	dialOptions        []grpc.DialOption
+	callOptions        []grpc.CallOption
+	timeout            time.Duration
 }
 
 // Opt allows callers to set options on the containerd client
@@ -64,6 +65,13 @@ func WithDefaultRuntime(rt string) Opt {
 func WithDefaultPlatform(platform platforms.MatchComparer) Opt {
 	return func(c *clientOpts) error {
 		c.defaultPlatform = platform
+		return nil
+	}
+}
+
+func WithPlatformMatherMap(platformMatcherMap map[string]platforms.MatchComparer) Opt {
+	return func(c *clientOpts) error {
+		c.platformMatcherMap = platformMatcherMap
 		return nil
 	}
 }
