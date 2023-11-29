@@ -41,6 +41,7 @@ import (
 	containerd "github.com/containerd/containerd/v2/client"
 	"github.com/containerd/containerd/v2/errdefs"
 	containerdimages "github.com/containerd/containerd/v2/images"
+	ctrdlabels "github.com/containerd/containerd/v2/labels"
 	"github.com/containerd/containerd/v2/pkg/cri/annotations"
 	criconfig "github.com/containerd/containerd/v2/pkg/cri/config"
 	crilabels "github.com/containerd/containerd/v2/pkg/cri/labels"
@@ -153,7 +154,23 @@ func (c *CRIImageService) PullImage(ctx context.Context, r *runtime.PullImageReq
 		tracing.Attribute("snapshotter.name", snapshotter),
 	)
 
+	// Get runtime handler from pull request or use defaut runtime class name if one
+	// was not specified
+	runtimeHdlr := r.GetImage().GetRuntimeHandler()
+	if runtimeHdlr == "" {
+		runtimeHdlr = c.config.ContainerdConfig.DefaultRuntimeName
+	}
+	// validate the runtimehandler to use for this image pull
+	_, ok := c.config.ContainerdConfig.Runtimes[runtimeHdlr]
+	if !ok {
+		return nil, fmt.Errorf("no runtime for %q is configured", runtimeHdlr)
+	}
+
 	labels := c.getLabels(ctx, ref)
+
+	// Add runtime handler label for the image
+	runtimeHandlerLabelKey := fmt.Sprintf(ctrdlabels.RuntimeHandlerLabelFormat, ctrdlabels.RuntimeHandlerLabelPrefix, runtimeHdlr)
+	labels[runtimeHandlerLabelKey] = runtimeHdlr
 
 	pullOpts := []containerd.RemoteOpt{
 		containerd.WithSchema1Conversion, //nolint:staticcheck // Ignore SA1019. Need to keep deprecated package for compatibility.
@@ -300,6 +317,7 @@ func (c *CRIImageService) createImageReference(ctx context.Context, name string,
 	if oldImg.Target.Digest == img.Target.Digest && oldImg.Labels[crilabels.ImageLabelKey] == labels[crilabels.ImageLabelKey] {
 		return nil
 	}
+
 	_, err = c.client.ImageService().Update(ctx, img, "target", "labels."+crilabels.ImageLabelKey)
 	return err
 }
