@@ -142,6 +142,16 @@ func WithPlatformMatcher(m platforms.MatchComparer) RemoteOpt {
 	}
 }
 
+// WithRuntimeHandler specifies the runtime handler used
+// while pulling the image. If none was specified at image
+// pull, default platform matcher is used.
+func WithRuntimeHandler(runtimeHandler string) RemoteOpt {
+	return func(_ *Client, c *RemoteContext) error {
+		c.RuntimeHandler = runtimeHandler
+		return nil
+	}
+}
+
 // WithPullUnpack is used to unpack an image after pull. This
 // uses the snapshotter, content store, and diff service
 // configured for the client.
