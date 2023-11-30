@@ -108,7 +108,7 @@ func New(address string, opts ...Opt) (*Client, error) {
 	if copts.platformMatcherMap != nil {
 		c.platformMatcherMap = copts.platformMatcherMap
 	} else {
-		return nil, fmt.Errorf("platformMatcher map not set")
+		return nil, fmt.Errorf("new Client: platformMatcher map not set")
 	}
 
 	if copts.defaultPlatform != nil {
