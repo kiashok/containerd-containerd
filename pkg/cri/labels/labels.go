@@ -37,4 +37,9 @@ const (
 	ContainerMetadataExtension = criContainerdPrefix + ".container.metadata"
 	// SandboxMetadataExtension is an extension name that identify metadata of sandbox in CreateContainerRequest
 	SandboxMetadataExtension = criContainerdPrefix + ".sandbox.metadata"
+
+	// RuntimeHandlerLabelPrefix is common prefix for runtime handler used for image pull
+	RuntimeHandlerLabelPrefix = "imagePullRuntimeHandler"
+
+	RuntimeHandlerLabelFormat = "%s.%s"
 )

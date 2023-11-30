@@ -41,7 +41,6 @@ import (
 	containerd "github.com/containerd/containerd/v2/client"
 	"github.com/containerd/containerd/v2/errdefs"
 	containerdimages "github.com/containerd/containerd/v2/images"
-	ctrdlabels "github.com/containerd/containerd/v2/labels"
 	"github.com/containerd/containerd/v2/pkg/cri/annotations"
 	criconfig "github.com/containerd/containerd/v2/pkg/cri/config"
 	crilabels "github.com/containerd/containerd/v2/pkg/cri/labels"
@@ -169,7 +168,7 @@ func (c *CRIImageService) PullImage(ctx context.Context, r *runtime.PullImageReq
 	labels := c.getLabels(ctx, ref)
 
 	// Add runtime handler label for the image
-	runtimeHandlerLabelKey := fmt.Sprintf(ctrdlabels.RuntimeHandlerLabelFormat, ctrdlabels.RuntimeHandlerLabelPrefix, runtimeHdlr)
+	runtimeHandlerLabelKey := fmt.Sprintf(crilabels.RuntimeHandlerLabelFormat, crilabels.RuntimeHandlerLabelPrefix, runtimeHdlr)
 	labels[runtimeHandlerLabelKey] = runtimeHdlr
 
 	pullOpts := []containerd.RemoteOpt{

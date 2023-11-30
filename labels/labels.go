@@ -30,7 +30,7 @@ const (
 	LabelDistributionSource = "containerd.io/distribution.source"
 
 	// RuntimeHandlerLabelPrefix is common prefix for runtime handler used for image pull
-	RuntimeHandlerLabelPrefix = "imagePullRuntimeHandler"
+	//RuntimeHandlerLabelPrefix = "imagePullRuntimeHandler"
 
-	RuntimeHandlerLabelFormat = "%s.%s"
+	//RuntimeHandlerLabelFormat = "%s.%s"
 )

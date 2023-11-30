@@ -46,10 +46,10 @@ import (
 	"github.com/containerd/containerd/v2/errdefs"
 	"github.com/containerd/containerd/v2/events"
 	"github.com/containerd/containerd/v2/images"
-	ctrdlabels "github.com/containerd/containerd/v2/labels"
 	"github.com/containerd/containerd/v2/leases"
 	leasesproxy "github.com/containerd/containerd/v2/leases/proxy"
 	"github.com/containerd/containerd/v2/namespaces"
+	"github.com/containerd/containerd/v2/pkg/cri/labels"
 	"github.com/containerd/containerd/v2/pkg/dialer"
 	"github.com/containerd/containerd/v2/platforms"
 	"github.com/containerd/containerd/v2/plugins"
@@ -520,7 +520,7 @@ func (c *Client) GetImage(ctx context.Context, ref string) (Image, error) {
 
 func (c *Client) GetPlatformMatcherForImage(image images.Image) platforms.MatchComparer {
 	for labelKey, labelValue := range image.Labels {
-		if strings.HasPrefix(labelKey, ctrdlabels.RuntimeHandlerLabelPrefix) {
+		if strings.HasPrefix(labelKey, labels.RuntimeHandlerLabelPrefix) {
 			platformMatcher := c.platformMatcherMap[labelValue]
 			return platformMatcher
 		}
