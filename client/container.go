@@ -35,6 +35,7 @@ import (
 	"github.com/containerd/containerd/v2/protobuf"
 	"github.com/containerd/containerd/v2/runtime/v2/runc/options"
 	"github.com/containerd/fifo"
+	"github.com/containerd/log"
 	"github.com/containerd/typeurl/v2"
 	ver "github.com/opencontainers/image-spec/specs-go"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
@@ -209,7 +210,14 @@ func (c *container) Image(ctx context.Context) (Image, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to get image %s for container: %w", r.Image, err)
 	}
-	return NewImage(c.client, i), nil
+
+	platformMatcher := c.client.GetPlatformMatcherForImage(i)
+	if platformMatcher == nil {
+		log.G(ctx).Warningf("No img runtimehandler label for image %v, using default matcher", i.Name)
+		return NewImage(c.client, i), nil
+	}
+
+	return NewImageWithPlatform(c.client, i, platformMatcher), nil
 }
 
 func (c *container) NewTask(ctx context.Context, ioCreate cio.Creator, opts ...NewTaskOpts) (_ Task, err error) {
@@ -386,7 +394,12 @@ func (c *container) Checkpoint(ctx context.Context, ref string, opts ...Checkpoi
 		return nil, err
 	}
 
-	return NewImage(c.client, checkpoint), nil
+	platformMatcher := c.client.GetPlatformMatcherForImage(checkpoint)
+	if platformMatcher == nil {
+		return nil, fmt.Errorf("platformMatcher is empty for image name %v", checkpoint.Name)
+	}
+
+	return NewImageWithPlatform(c.client, checkpoint, platformMatcher), nil
 }
 
 func (c *container) loadTask(ctx context.Context, ioAttach cio.Attach) (Task, error) {

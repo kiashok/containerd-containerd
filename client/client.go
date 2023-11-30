@@ -46,6 +46,7 @@ import (
 	"github.com/containerd/containerd/v2/errdefs"
 	"github.com/containerd/containerd/v2/events"
 	"github.com/containerd/containerd/v2/images"
+	ctrdlabels "github.com/containerd/containerd/v2/labels"
 	"github.com/containerd/containerd/v2/leases"
 	leasesproxy "github.com/containerd/containerd/v2/leases/proxy"
 	"github.com/containerd/containerd/v2/namespaces"
@@ -60,6 +61,7 @@ import (
 	"github.com/containerd/containerd/v2/services/introspection"
 	"github.com/containerd/containerd/v2/snapshots"
 	snproxy "github.com/containerd/containerd/v2/snapshots/proxy"
+	"github.com/containerd/log"
 	"github.com/containerd/typeurl/v2"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/opencontainers/runtime-spec/specs-go"
@@ -498,7 +500,32 @@ func (c *Client) GetImage(ctx context.Context, ref string) (Image, error) {
 	if err != nil {
 		return nil, err
 	}
-	return NewImage(c, i), nil
+
+	// With image pull per runtime class support, an image is not referenced as
+	// a tuple of (imageName, runtimeHandler) in cri.
+	// The same image can now be referenced by different runtime handlers. This is
+	// indicated by the number of runtime handler labels set on the image.
+	// If an image has more than one runtime handler labels, it means that the same
+	// platform matcher was used by the runtime handlers to pull this image.
+	// Pick the platform matcher used by any one of the runtime handlers and set that
+	// as the platform matcher in NewImage()
+	platformMatcher := c.GetPlatformMatcherForImage(i)
+	if platformMatcher == nil {
+		log.G(ctx).Warningf("No img runtimehandler label for image %v, using default matcher", i.Name)
+		return NewImage(c, i), nil
+	}
+
+	return NewImageWithPlatform(c, i, platformMatcher), nil
+}
+
+func (c *Client) GetPlatformMatcherForImage(image images.Image) platforms.MatchComparer {
+	for labelKey, labelValue := range image.Labels {
+		if strings.HasPrefix(labelKey, ctrdlabels.RuntimeHandlerLabelPrefix) {
+			platformMatcher := c.platformMatcherMap[labelValue]
+			return platformMatcher
+		}
+	}
+	return nil
 }
 
 // ListImages returns all existing images
@@ -509,7 +536,13 @@ func (c *Client) ListImages(ctx context.Context, filters ...string) ([]Image, er
 	}
 	images := make([]Image, len(imgs))
 	for i, img := range imgs {
-		images[i] = NewImage(c, img)
+		platformMatcher := c.GetPlatformMatcherForImage(img)
+		if platformMatcher == nil {
+			log.G(ctx).Warningf("No img runtimehandler label for image %v, using default matcher", img.Name)
+			images[i] = NewImage(c, img)
+		}
+
+		images[i] = NewImageWithPlatform(c, img, platformMatcher)
 	}
 	return images, nil
 }

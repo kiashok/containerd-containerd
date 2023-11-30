@@ -24,6 +24,7 @@ import (
 	containerd "github.com/containerd/containerd/v2/client"
 	"github.com/containerd/containerd/v2/cmd/ctr/commands"
 	"github.com/containerd/containerd/v2/pkg/progress"
+	"github.com/containerd/log"
 
 	"github.com/opencontainers/image-spec/identity"
 	"github.com/urfave/cli"
@@ -56,7 +57,14 @@ var usageCommand = cli.Command{
 			return fmt.Errorf("failed to ensure if image %s exists: %w", ref, err)
 		}
 
-		i := containerd.NewImage(client, img)
+		var i containerd.Image
+		platformMatcher := client.GetPlatformMatcherForImage(img)
+		if platformMatcher == nil {
+			log.G(ctx).Warningf("No img runtimehandler label for image %v, using default matcher", i.Name)
+			i = containerd.NewImage(client, img)
+		}
+
+		i = containerd.NewImageWithPlatform(client, img, platformMatcher)
 		if ok, err := i.IsUnpacked(ctx, snapshotter); err != nil {
 			return fmt.Errorf("failed to ensure if image %s has been unpacked in snapshotter %s: %w",
 				ref, snapshotter, err)

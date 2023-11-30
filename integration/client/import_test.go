@@ -111,7 +111,14 @@ func testExportImport(t *testing.T, imageName string) {
 
 	// We need to unpack the image, especially if it's multilayered.
 	for _, img := range imgrecs {
-		image := NewImage(client, img)
+		var image Image
+		platformMatcher := client.GetPlatformMatcherForImage(img)
+		if platformMatcher == nil {
+			t.Logf("No img runtimehandler label for image %v, using default matcher", img.Name)
+			image = NewImage(client, img)
+		}
+
+		image = NewImageWithPlatform(client, img, platformMatcher)
 
 		// TODO: Show unpack status
 		t.Logf("unpacking %s (%s)...", img.Name, img.Target.Digest)
