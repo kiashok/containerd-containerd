@@ -120,12 +120,11 @@ command. As part of this process, we do the following:
 
 				if len(p) == 0 {
 					p = append(p, platforms.DefaultSpec())
-					sopts = append(sopts, image.SetDefaultRuntimeHandler())
 				} else {
 					// specify runtime handler if []platforms > 0
 					runtimeHandler := context.String("runtime-handler")
 					if runtimeHandler == "" {
-						return fmt.Errorf("runtimeHandler not set")
+						return fmt.Errorf("runtimeHandler should be set if --platform flag is being used")
 					}
 					sopts = append(sopts, image.WithRuntimeHandler(runtimeHandler))
 				}
@@ -154,7 +153,7 @@ command. As part of this process, we do the following:
 			pf, done := ProgressHandler(ctx, os.Stdout)
 			defer done()
 
-			return client.Transfer(ctx, reg, is, transfer.WithProgress(pf))
+			return client.Transfer(ctx, reg, is, transfer.WithProgress(pf)) // TODO(kiashok): Test!
 		}
 
 		ctx, done, err := client.WithLease(ctx)

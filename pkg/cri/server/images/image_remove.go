@@ -19,13 +19,27 @@ package images
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/containerd/containerd/v2/errdefs"
 	"github.com/containerd/containerd/v2/images"
+	ctrdlabels "github.com/containerd/containerd/v2/labels"
 	"github.com/containerd/containerd/v2/tracing"
+	"github.com/pkg/errors"
 
 	runtime "k8s.io/cri-api/pkg/apis/runtime/v1"
 )
+
+func runtimeHandlerLabelExists(labels map[string]string) bool {
+	runtimeHandlerLabelExists := false
+	for imageLabelKey, _ := range labels {
+		if strings.HasPrefix(imageLabelKey, ctrdlabels.RuntimeHandlerLabelPrefix) {
+			runtimeHandlerLabelExists = true
+			break
+		}
+	}
+	return runtimeHandlerLabelExists
+}
 
 // RemoveImage removes the image.
 // TODO(random-liu): Update CRI to pass image reference instead of ImageSpec. (See
@@ -35,7 +49,17 @@ import (
 // semantic defined in CRI now.
 func (c *CRIImageService) RemoveImage(ctx context.Context, r *runtime.RemoveImageRequest) (*runtime.RemoveImageResponse, error) {
 	span := tracing.SpanFromContext(ctx)
-	image, err := c.LocalResolve(r.GetImage().GetImage())
+	runtimeHdlr := r.Image.GetRuntimeHandler()
+	if runtimeHdlr == "" {
+		runtimeHdlr = c.config.ContainerdConfig.DefaultRuntimeName
+	}
+	// validate the runtimehandler to use for this image pull
+	_, ok := c.config.ContainerdConfig.Runtimes[runtimeHdlr]
+	if !ok {
+		return nil, fmt.Errorf("no runtime for %q is configured", runtimeHdlr)
+	}
+
+	image, err := c.LocalResolve(r.GetImage().GetImage(), runtimeHdlr)
 	if err != nil {
 		if errdefs.IsNotFound(err) {
 			span.AddEvent(err.Error())
@@ -44,25 +68,45 @@ func (c *CRIImageService) RemoveImage(ctx context.Context, r *runtime.RemoveImag
 		}
 		return nil, fmt.Errorf("can not resolve %q locally: %w", r.GetImage().GetImage(), err)
 	}
-	span.SetAttributes(tracing.Attribute("image.id", image.ID))
+	span.SetAttributes(tracing.Attribute("image.id", image.Key.ID))
 	// Remove all image references.
-	for i, ref := range image.References {
+	for _, ref := range image.References {
 		var opts []images.DeleteOpt
-		if i == len(image.References)-1 {
-			// Delete the last image reference synchronously to trigger garbage collection.
-			// This is best effort. It is possible that the image reference is deleted by
-			// someone else before this point.
-			opts = []images.DeleteOpt{images.SynchronousDelete()}
-		}
-		err = c.client.ImageService().Delete(ctx, ref, opts...)
+
+		// Remove the label from containerd DB for this image
+		var updatedImg images.Image
+		ctrdImg, err := c.client.ImageService().Get(ctx, ref)
 		if err == nil || errdefs.IsNotFound(err) {
-			// Update image store to reflect the newest state in containerd.
-			if err := c.imageStore.Update(ctx, ref); err != nil {
-				return nil, fmt.Errorf("failed to update image reference %q for %q: %w", ref, image.ID, err)
+			// remove the runtimeHandler label from containerd image
+			runtimeHandlerKey := fmt.Sprintf(ctrdlabels.RuntimeHandlerLabelFormat, ctrdlabels.RuntimeHandlerLabelPrefix, runtimeHdlr)
+			if ctrdImg.Labels[runtimeHandlerKey] != "" {
+				delete(ctrdImg.Labels, runtimeHandlerKey)
+				updatedImg, err = c.client.ImageService().Update(ctx, ctrdImg, "labels", "runtimeHandler."+runtimeHdlr)
+				if err != nil {
+					return nil, errors.Wrapf(err, "failed to remove imageRef %v", ref)
+				}
 			}
-			continue
+			// delete ref from CRI image store
+			err := c.imageStore.DeleteRefWithRuntimeHandler(ctx, ref, runtimeHdlr)
+			// Update image store to reflect the newest state in containerd.
+			if err != nil {
+				return nil, fmt.Errorf("failed to update image reference %q for %q: %w", ref, image.Key.ID, err)
+			}
+
+			if runtimeHandlerLabelExists(updatedImg.Labels) == false {
+				opts = []images.DeleteOpt{images.SynchronousDelete()}
+
+				err = c.client.ImageService().Delete(ctx, ref, opts...)
+				if err == nil || errdefs.IsNotFound(err) {
+					// Update image store to reflect the newest state in containerd.
+					if err := c.imageStore.Update(ctx, ref, runtimeHdlr); err != nil {
+						return nil, fmt.Errorf("failed to update image reference %q for %q: %w", ref, image.Key.ID, err)
+					}
+					continue
+				}
+				return nil, fmt.Errorf("failed to delete image reference %q for %q: %w", ref, image.Key.ID, err)
+			}
 		}
-		return nil, fmt.Errorf("failed to delete image reference %q for %q: %w", ref, image.ID, err)
 	}
 	return &runtime.RemoveImageResponse{}, nil
 }

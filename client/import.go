@@ -35,6 +35,7 @@ type importOpts struct {
 	skipDgstRef     func(string) bool
 	allPlatforms    bool
 	platformMatcher platforms.MatchComparer
+	runtimeHandler  string
 	compress        bool
 	discardLayers   bool
 }
@@ -56,6 +57,13 @@ func WithImageRefTranslator(f func(string) string) ImportOpt {
 func WithDigestRef(f func(digest.Digest) string) ImportOpt {
 	return func(c *importOpts) error {
 		c.dgstRefT = f
+		return nil
+	}
+}
+
+func WithRuntimeHandlerForImport(runtimeHandler string) ImportOpt {
+	return func(c *importOpts) error {
+		c.runtimeHandler = runtimeHandler
 		return nil
 	}
 }
@@ -208,7 +216,7 @@ func (c *Client) Import(ctx context.Context, reader io.Reader, opts ...ImportOpt
 	}
 
 	for i := range imgs {
-		img, err := is.Update(ctx, imgs[i], "target")
+		img, err := is.Update(ctx, imgs[i], "target", "runtimeHandler."+iopts.runtimeHandler)
 		if err != nil {
 			if !errdefs.IsNotFound(err) {
 				return nil, err

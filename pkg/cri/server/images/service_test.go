@@ -59,7 +59,9 @@ var testConfig = criconfig.Config{
 
 func TestLocalResolve(t *testing.T) {
 	image := imagestore.Image{
-		ID:      "sha256:c75bebcdd211f41b3a460c7bf82970ed6c75acaab9cd4c9a4e125b03ca113799",
+		Key: imagestore.ImageKey{
+			ID: "sha256:c75bebcdd211f41b3a460c7bf82970ed6c75acaab9cd4c9a4e125b03ca113799",
+		},
 		ChainID: "test-chain-id-1",
 		References: []string{
 			"docker.io/library/busybox:latest",
@@ -87,11 +89,11 @@ func TestLocalResolve(t *testing.T) {
 		"docker.io/library/busybox:latest",
 		"docker.io/library/busybox@sha256:e6693c20186f837fc393390135d8a598a96a833917917789d63766cab6c59582",
 	} {
-		img, err := c.LocalResolve(ref)
+		img, err := c.LocalResolve(ref, "")
 		assert.NoError(t, err)
 		assert.Equal(t, image, img)
 	}
-	img, err := c.LocalResolve("randomid")
+	img, err := c.LocalResolve("randomid", "")
 	assert.Equal(t, errdefs.IsNotFound(err), true)
 	assert.Equal(t, imagestore.Image{}, img)
 }

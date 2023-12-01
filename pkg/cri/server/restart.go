@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -28,11 +29,11 @@ import (
 	containerd "github.com/containerd/containerd/v2/client"
 	"github.com/containerd/containerd/v2/errdefs"
 	containerdimages "github.com/containerd/containerd/v2/images"
+	ctrdlabels "github.com/containerd/containerd/v2/labels"
 	criconfig "github.com/containerd/containerd/v2/pkg/cri/config"
 	crilabels "github.com/containerd/containerd/v2/pkg/cri/labels"
 	"github.com/containerd/containerd/v2/pkg/cri/server/podsandbox"
 	"github.com/containerd/containerd/v2/pkg/netns"
-	"github.com/containerd/containerd/v2/platforms"
 	"github.com/containerd/log"
 	"github.com/containerd/typeurl/v2"
 	"golang.org/x/sync/errgroup"
@@ -422,40 +423,58 @@ func getNetNS(meta *sandboxstore.Metadata) *netns.NetNS {
 	return netns.LoadNetNS(meta.NetNSPath)
 }
 
+func getAllRuntimeHandlerLabels(img containerd.Image) []string {
+	var listOfRuntimeHandlers []string
+	imageLabels := img.Labels()
+	for imageLabelKey, imageLabelValue := range imageLabels {
+		if strings.HasPrefix(imageLabelKey, ctrdlabels.RuntimeHandlerLabelPrefix) {
+			listOfRuntimeHandlers = append(listOfRuntimeHandlers, imageLabelValue)
+		}
+	}
+	return listOfRuntimeHandlers
+}
+
 // loadImages loads images from containerd.
 func (c *criService) loadImages(ctx context.Context, cImages []containerd.Image) {
 	snapshotter := c.config.ContainerdConfig.Snapshotter
 	var wg sync.WaitGroup
 	for _, i := range cImages {
+
 		wg.Add(1)
 		i := i
 		go func() {
 			defer wg.Done()
-			ok, _, _, _, err := containerdimages.Check(ctx, i.ContentStore(), i.Target(), platforms.Default())
-			if err != nil {
-				log.G(ctx).WithError(err).Errorf("Failed to check image content readiness for %q", i.Name())
-				return
+			// an image can exist for more than one runtimeHandler. So make sure that each one of them
+			// is restored
+			runtimeHandlerLabels := getAllRuntimeHandlerLabels(i)
+			for _, runtimeHandler := range runtimeHandlerLabels {
+				ok, _, _, _, err := containerdimages.Check(ctx, i.ContentStore(), i.Target(), c.platformMatcherMap[runtimeHandler])
+				if err != nil {
+					log.G(ctx).WithError(err).Errorf("Failed to check image content readiness for %q", i.Name())
+					return
+				}
+				if !ok {
+					log.G(ctx).Warnf("The image content readiness for %q is not ok", i.Name())
+					return
+				}
+				// Checking existence of top-level snapshot for each image being recovered.
+				unpacked, err := i.IsUnpacked(ctx, snapshotter)
+				if err != nil {
+					log.G(ctx).WithError(err).Warnf("Failed to check whether image is unpacked for image %s", i.Name())
+					return
+				}
+				if !unpacked {
+					log.G(ctx).Warnf("The image %s is not unpacked.", i.Name())
+					// TODO(random-liu): Consider whether we should try unpack here.
+				}
+				if err := c.UpdateImage(ctx, i.Name(), runtimeHandler); err != nil {
+					log.G(ctx).WithError(err).Warnf("Failed to update reference for image %q", i.Name())
+					return
+				}
+				log.G(ctx).Debugf("Loaded image %q", i.Name())
 			}
-			if !ok {
-				log.G(ctx).Warnf("The image content readiness for %q is not ok", i.Name())
-				return
-			}
-			// Checking existence of top-level snapshot for each image being recovered.
-			unpacked, err := i.IsUnpacked(ctx, snapshotter)
-			if err != nil {
-				log.G(ctx).WithError(err).Warnf("Failed to check whether image is unpacked for image %s", i.Name())
-				return
-			}
-			if !unpacked {
-				log.G(ctx).Warnf("The image %s is not unpacked.", i.Name())
-				// TODO(random-liu): Consider whether we should try unpack here.
-			}
-			if err := c.UpdateImage(ctx, i.Name()); err != nil {
-				log.G(ctx).WithError(err).Warnf("Failed to update reference for image %q", i.Name())
-				return
-			}
-			log.G(ctx).Debugf("Loaded image %q", i.Name())
 		}()
+
 	}
 	wg.Wait()
 }

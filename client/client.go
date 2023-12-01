@@ -46,6 +46,7 @@ import (
 	"github.com/containerd/containerd/v2/errdefs"
 	"github.com/containerd/containerd/v2/events"
 	"github.com/containerd/containerd/v2/images"
+	ctrdlabels "github.com/containerd/containerd/v2/labels"
 	"github.com/containerd/containerd/v2/leases"
 	leasesproxy "github.com/containerd/containerd/v2/leases/proxy"
 	"github.com/containerd/containerd/v2/namespaces"
@@ -107,6 +108,10 @@ func New(address string, opts ...Opt) (*Client, error) {
 		c.defaultPlatform = copts.defaultPlatform
 	} else {
 		c.defaultPlatform = platforms.Default()
+	}
+
+	if copts.platformMatcherMap != nil {
+		c.platformMatcherMap = copts.platformMatcherMap
 	}
 
 	if copts.services != nil {
@@ -193,6 +198,10 @@ func NewWithConn(conn *grpc.ClientConn, opts ...Opt) (*Client, error) {
 		c.defaultPlatform = platforms.Default()
 	}
 
+	if copts.platformMatcherMap != nil {
+		c.platformMatcherMap = copts.platformMatcherMap
+	}
+
 	// check namespace labels for default runtime
 	if copts.defaultRuntime == "" && c.defaultns != "" {
 		if label, err := c.GetLabel(context.Background(), defaults.DefaultRuntimeNSLabel); err != nil {
@@ -217,7 +226,9 @@ type Client struct {
 	runtime         string
 	defaultns       string
 	defaultPlatform platforms.MatchComparer
-	connector       func() (*grpc.ClientConn, error)
+	// initialized only through InitCriService
+	platformMatcherMap map[string]platforms.MatchComparer
+	connector          func() (*grpc.ClientConn, error)
 }
 
 // Reconnect re-establishes the GRPC connection to the containerd daemon
@@ -426,7 +437,7 @@ func (c *Client) Fetch(ctx context.Context, ref string, opts ...RemoteOpt) (imag
 	if err != nil {
 		return images.Image{}, err
 	}
-	return c.createNewImage(ctx, img, fetchCtx.RuntimeHandler)
+	return c.createNewImage(ctx, img, fetchCtx.RuntimeHandler) // TODO (kiashok) test!
 }
 
 // Push uploads the provided content to a remote resource
@@ -482,12 +493,37 @@ func (c *Client) Push(ctx context.Context, ref string, desc ocispec.Descriptor, 
 }
 
 // GetImage returns an existing image
-func (c *Client) GetImage(ctx context.Context, ref string) (Image, error) {
+func (c *Client) GetImage(ctx context.Context, ref string, runtimeHandler string) (Image, error) {
 	i, err := c.ImageService().Get(ctx, ref)
 	if err != nil {
 		return nil, err
 	}
+	// With image pull per runtime class, an image can now be pulled with a non-default
+	// runtimeHandler. Therefore, ensure that we return the right platform matcher that was
+	// used to pull the image.
+	/*
+		runtimeHandler := getRuntimeHandlerForImage(i)
+		if runtimeHandler != "" && c.platformMatcherMap != nil {
+			return NewImageWithPlatform(c, i, c.platformMatcherMap[runtimeHandler]), nil
+		}
+	*/
+	if runtimeHandler != "" {
+		return NewImageWithPlatform(c, i, c.platformMatcherMap[runtimeHandler]), nil
+	}
 	return NewImage(c, i), nil
+}
+
+// With image pull per runtime class, an image can now be pulled with a non-default
+// runtimeHandler. Therefore, ensure that we return the right platform matcher that was
+// used to pull the image.
+func getRuntimeHandlersForImage(img images.Image) []string {
+	var runtimeHandler []string
+	for imageLabelKey, imageLabelValue := range img.Labels {
+		if strings.HasPrefix(imageLabelKey, ctrdlabels.RuntimeHandlerLabelPrefix) {
+			runtimeHandler = append(runtimeHandler, imageLabelValue)
+		}
+	}
+	return runtimeHandler
 }
 
 // ListImages returns all existing images
@@ -498,7 +534,10 @@ func (c *Client) ListImages(ctx context.Context, filters ...string) ([]Image, er
 	}
 	images := make([]Image, len(imgs))
 	for i, img := range imgs {
-		images[i] = NewImage(c, img)
+		runtimeHandlers := getRuntimeHandlersForImage(img)
+		for _, runtimeHdlr := range runtimeHandlers {
+			images[i] = NewImageWithPlatform(c, img, c.platformMatcherMap[runtimeHdlr])
+		}
 	}
 	return images, nil
 }

@@ -88,6 +88,13 @@ func initCRIService(ic *plugin.InitContext) (interface{}, error) {
 		return nil, fmt.Errorf("failed to set glog level: %w", err)
 	}
 
+	// initialize matchComparer for each runtime handler defined in containerd toml
+	platformMap := make(map[string]platforms.MatchComparer)
+	err := initializePlatformMatcherMap(ctx, c, platformMap)
+	if err != nil {
+		return nil, err
+	}
+
 	log.G(ctx).Info("Connect containerd service")
 	client, err := containerd.New(
 		"",
@@ -95,16 +102,10 @@ func initCRIService(ic *plugin.InitContext) (interface{}, error) {
 		containerd.WithDefaultPlatform(platforms.Default()),
 		containerd.WithInMemoryServices(ic),
 		containerd.WithInMemorySandboxControllers(ic),
+		containerd.WithPlatformMatcherMap(platformMap),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create containerd client: %w", err)
-	}
-
-	// initialize matchComparer for each runtime handler defined in containerd toml
-	platformMap := make(map[string]platforms.MatchComparer)
-	err = initializePlatformMatcherMap(ctx, c, platformMap)
-	if err != nil {
-		return nil, err
 	}
 
 	s, err := server.NewCRIService(c, client, platformMap, getNRIAPI(ic))
@@ -147,13 +148,14 @@ func initializePlatformMatcherMap(ctx context.Context, c criconfig.Config, platf
 			platformMap[k] = platforms.Only(platforms.DefaultSpec())
 		}
 	}
+
 	return nil
 }
 
 func getWindowsGuestPlatformMatcher(ctx context.Context, ociRuntime criconfig.Runtime, runtimeHandler string) (platforms.MatchComparer, error) {
 	runtimeOpts, err := server.GenerateRuntimeOptions(ociRuntime)
 	if err != nil {
-		return nil, fmt.Errorf("Failed to get runtime options for runtime: %v", runtimeHandler)
+		return nil, fmt.Errorf("failed to get runtime options for runtime: %v", runtimeHandler)
 	}
 	if server.IsWindowsSandboxIsolation(ctx, runtimeOpts) {
 		// ensure that OSVersion is mentioned for windows runtime handlers

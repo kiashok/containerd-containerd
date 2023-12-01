@@ -107,6 +107,7 @@ If foobar.tar contains an OCI ref named "latest" and anonymous ref "sha256:deadb
 			platformMatcher platforms.MatchComparer
 		)
 
+		// TODO(kiashok) : Add option for --runtimeHandler and pass that in ImportOpts
 		client, ctx, cancel, err := commands.NewClient(context)
 		if err != nil {
 			return err

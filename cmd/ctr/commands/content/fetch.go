@@ -31,6 +31,7 @@ import (
 	"github.com/containerd/containerd/v2/content"
 	"github.com/containerd/containerd/v2/errdefs"
 	"github.com/containerd/containerd/v2/images"
+	ctrdlabels "github.com/containerd/containerd/v2/labels"
 	"github.com/containerd/containerd/v2/pkg/progress"
 	"github.com/containerd/containerd/v2/platforms"
 	"github.com/containerd/containerd/v2/remotes"
@@ -134,12 +135,12 @@ func NewFetchConfig(ctx context.Context, clicontext *cli.Context) (*FetchConfig,
 	}
 
 	runtimeHandler := clicontext.String("runtime-handler")
-	if runtimeHandler == "" {
-		config.RemoteOpts = append(config.RemoteOpts, containerd.SetDefaultRuntimeHander())
-	} else {
-		config.RemoteOpts = append(config.RemoteOpts, containerd.WithRuntimeHandler(runtimeHandler))
+	//config.RemoteOpts = append(config.RemoteOpts, containerd.WithRuntimeHandler(runtimeHandler))
+	if runtimeHandler != "" {
+		runtimeHandlerLabelKey := fmt.Sprintf(ctrdlabels.RuntimeHandlerLabelPrefix, runtimeHandler)
+		runtimeHandlerLabel := fmt.Sprintf("%v=%v", runtimeHandlerLabelKey, runtimeHandler)
+		config.Labels = append(config.Labels, runtimeHandlerLabel)
 	}
-
 	if !clicontext.GlobalBool("debug") {
 		config.ProgressOutput = os.Stdout
 	}

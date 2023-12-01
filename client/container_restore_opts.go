@@ -43,7 +43,7 @@ var (
 type RestoreOpts func(context.Context, string, *Client, Image, *imagespec.Index) NewContainerOpts
 
 // WithRestoreImage restores the image for the container
-func WithRestoreImage(ctx context.Context, id string, client *Client, checkpoint Image, index *imagespec.Index) NewContainerOpts {
+func WithRestoreImage(ctx context.Context, id string, client *Client, checkpoint Image, runtimeHandler string, index *imagespec.Index) NewContainerOpts {
 	return func(ctx context.Context, client *Client, c *containers.Container) error {
 		name, ok := index.Annotations[checkpointImageNameLabel]
 		if !ok || name == "" {
@@ -53,12 +53,15 @@ func WithRestoreImage(ctx context.Context, id string, client *Client, checkpoint
 		if !ok || name == "" {
 			return ErrSnapshotterNameNotFoundInIndex
 		}
-		i, err := client.GetImage(ctx, name)
+
+		// get runtime Handler of the pod sanbox
+
+		i, err := client.GetImage(ctx, name, runtimeHandler)
 		if err != nil {
 			return err
 		}
 
-		diffIDs, err := i.(*image).i.RootFS(ctx, client.ContentStore(), client.defaultPlatform)
+		diffIDs, err := i.(*image).i.RootFS(ctx, client.ContentStore(), client.platformMatcherMap[runtimeHandler])
 		if err != nil {
 			return err
 		}

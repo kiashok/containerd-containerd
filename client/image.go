@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/containerd/containerd/v2/content"
@@ -29,6 +30,7 @@ import (
 	"github.com/containerd/containerd/v2/images"
 	"github.com/containerd/containerd/v2/images/usage"
 	"github.com/containerd/containerd/v2/labels"
+	ctrdlabels "github.com/containerd/containerd/v2/labels"
 	"github.com/containerd/containerd/v2/pkg/kmutex"
 	"github.com/containerd/containerd/v2/platforms"
 	"github.com/containerd/containerd/v2/rootfs"
@@ -115,10 +117,23 @@ var _ = (Image)(&image{})
 
 // NewImage returns a client image object from the metadata image
 func NewImage(client *Client, i images.Image) Image {
+	runtimeHandler := ""
+	platformUsedForPullingImage := client.defaultPlatform
+
+	for imageLabelKey, imageLabelValue := range i.Labels {
+		if strings.HasPrefix(imageLabelKey, ctrdlabels.RuntimeHandlerLabelPrefix) {
+			runtimeHandler = imageLabelValue
+			break
+		}
+	}
+	if runtimeHandler != "" && client.platformMatcherMap != nil {
+		platformUsedForPullingImage = client.platformMatcherMap[runtimeHandler]
+	}
+
 	return &image{
 		client:   client,
 		i:        i,
-		platform: client.defaultPlatform,
+		platform: platformUsedForPullingImage,
 	}
 }
 
@@ -136,7 +151,8 @@ type image struct {
 
 	i        images.Image
 	platform platforms.MatchComparer
-	diffIDs  []digest.Digest
+	//runtimeHandler string
+	diffIDs []digest.Digest
 
 	mu sync.Mutex
 }
