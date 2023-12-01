@@ -144,6 +144,14 @@ func WithRuntimeHandler(runtimeHandler string) RemoteOpt {
 	}
 }
 
+// Should default runtime handler be used in CRI layer
+func SetDefaultRuntimeHander() RemoteOpt {
+	return func(_ *Client, c *RemoteContext) error {
+		c.isDefaultRuntimeHandler = true
+		return nil
+	}
+}
+
 // WithPullUnpack is used to unpack an image after pull. This
 // uses the snapshotter, content store, and diff service
 // configured for the client.

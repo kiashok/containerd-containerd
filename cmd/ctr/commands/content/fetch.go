@@ -126,11 +126,20 @@ func NewFetchConfig(ctx context.Context, clicontext *cli.Context) (*FetchConfig,
 	if err != nil {
 		return nil, err
 	}
+
 	config := &FetchConfig{
 		Resolver:  resolver,
 		Labels:    clicontext.StringSlice("label"),
 		TraceHTTP: clicontext.Bool("http-trace"),
 	}
+
+	runtimeHandler := clicontext.String("runtime-handler")
+	if runtimeHandler == "" {
+		config.RemoteOpts = append(config.RemoteOpts, containerd.SetDefaultRuntimeHander())
+	} else {
+		config.RemoteOpts = append(config.RemoteOpts, containerd.WithRuntimeHandler(runtimeHandler))
+	}
+
 	if !clicontext.GlobalBool("debug") {
 		config.ProgressOutput = os.Stdout
 	}

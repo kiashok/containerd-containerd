@@ -42,12 +42,14 @@ func init() {
 }
 
 type Store struct {
-	imageName     string
-	imageLabels   map[string]string
-	platforms     []ocispec.Platform
-	allMetadata   bool
-	labelMap      func(ocispec.Descriptor) []string
-	manifestLimit int
+	imageName               string
+	imageLabels             map[string]string
+	platforms               []ocispec.Platform
+	isDefaultRuntimeHandler bool
+	runtimeHandler          string
+	allMetadata             bool
+	labelMap                func(ocispec.Descriptor) []string
+	manifestLimit           int
 
 	// extraReferences are used to store or lookup multiple references
 	extraReferences []Reference
@@ -99,6 +101,20 @@ func WithImageLabels(labels map[string]string) StoreOpt {
 func WithPlatforms(p ...ocispec.Platform) StoreOpt {
 	return func(s *Store) {
 		s.platforms = append(s.platforms, p...)
+	}
+}
+
+// SetDefaultRuntimeHandler specifies which platforms to fetch content for
+func SetDefaultRuntimeHandler() StoreOpt {
+	return func(s *Store) {
+		s.isDefaultRuntimeHandler = true
+	}
+}
+
+// WithRuntimeHandler specifies which platforms to fetch content for
+func WithRuntimeHandler(runtimeHandler string) StoreOpt {
+	return func(s *Store) {
+		s.runtimeHandler = runtimeHandler
 	}
 }
 
