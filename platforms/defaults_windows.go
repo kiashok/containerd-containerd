@@ -117,3 +117,8 @@ func prefix(v string) string {
 func Default() MatchComparer {
 	return Only(DefaultSpec())
 }
+
+func AreHostAndGuestHyperVCompatible(hostPlatform, guestPlatform specs.Platform) bool {
+	// TODO(kiashok): Implement with the msdocs compat matrix
+	return true
+}

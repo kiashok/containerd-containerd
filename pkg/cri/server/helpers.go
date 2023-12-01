@@ -75,8 +75,8 @@ const (
 	// defaultIfName is the default network interface for the pods
 	defaultIfName = "eth0"
 
-	// runtimeRunhcsV1 is the runtime type for runhcs.
-	runtimeRunhcsV1 = "io.containerd.runhcs.v1"
+	// RuntimeRunhcsV1 is the runtime type for runhcs.
+	RuntimeRunhcsV1 = "io.containerd.runhcs.v1"
 
 	// devShm is the default path of /dev/shm.
 	devShm = "/dev/shm"
@@ -251,7 +251,7 @@ func buildLabels(configLabels, imageConfigLabels map[string]string, containerTyp
 }
 
 // generateRuntimeOptions generates runtime options from cri plugin config.
-func generateRuntimeOptions(r criconfig.Runtime) (interface{}, error) {
+func GenerateRuntimeOptions(r criconfig.Runtime) (interface{}, error) {
 	if r.Options == nil {
 		return nil, nil
 	}
@@ -280,7 +280,7 @@ func getRuntimeOptionsType(t string) interface{} {
 	switch t {
 	case plugins.RuntimeRuncV2:
 		return &runcoptions.Options{}
-	case runtimeRunhcsV1:
+	case RuntimeRunhcsV1:
 		return &runhcsoptions.Options{}
 	default:
 		return &runtimeoptions.Options{}

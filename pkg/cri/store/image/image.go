@@ -76,19 +76,24 @@ type Store struct {
 
 	// platform represents the currently supported platform for images
 	// TODO: Make this store multi-platform
-	platform platforms.MatchComparer
+	platform platforms.MatchComparer // TODO (kiashok): remove?
+
+	// initializes matchComparer for each runtime class using default platform or
+	// guestPlatform specified for the runtime handler (see pkg/cri/config/config.go).
+	platformMatcherMap map[string]platforms.MatchComparer
 
 	// store is the internal image store indexed by image id.
 	store *store
 }
 
 // NewStore creates an image store.
-func NewStore(img images.Store, provider InfoProvider, platform platforms.MatchComparer) *Store {
+func NewStore(img images.Store, provider InfoProvider, platform platforms.MatchComparer, platformMatcherMap map[string]platforms.MatchComparer) *Store {
 	return &Store{
-		refCache: make(map[string]string),
-		images:   img,
-		provider: provider,
-		platform: platform,
+		refCache:           make(map[string]string),
+		images:             img,
+		provider:           provider,
+		platform:           platform,
+		platformMatcherMap: platformMatcherMap,
 		store: &store{
 			images:     make(map[string]Image),
 			digestSet:  digestset.NewSet(),

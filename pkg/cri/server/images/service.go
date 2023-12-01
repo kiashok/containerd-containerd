@@ -39,6 +39,9 @@ type CRIImageService struct {
 	config criconfig.Config
 	// client is an instance of the containerd client
 	client *containerd.Client
+	// initializes matchComparer for each runtime class using default platform or
+	// guestPlatform specified for the runtime handler (see pkg/cri/config/config.go).
+	platformMatcherMap map[string]platforms.MatchComparer
 	// imageFSPaths contains path to image filesystem for snapshotters.
 	imageFSPaths map[string]string
 	// imageStore stores all resources associated with images.
@@ -51,11 +54,12 @@ type CRIImageService struct {
 	unpackDuplicationSuppressor kmutex.KeyedLocker
 }
 
-func NewService(config criconfig.Config, imageFSPaths map[string]string, client *containerd.Client) (*CRIImageService, error) {
+func NewService(config criconfig.Config, imageFSPaths map[string]string, client *containerd.Client, platformMatcherMap map[string]platforms.MatchComparer) (*CRIImageService, error) {
 	svc := CRIImageService{
 		config:                      config,
 		client:                      client,
-		imageStore:                  imagestore.NewStore(client.ImageService(), client.ContentStore(), platforms.Default()),
+		platformMatcherMap:          platformMatcherMap,
+		imageStore:                  imagestore.NewStore(client.ImageService(), client.ContentStore(), platforms.Default(), platformMatcherMap),
 		imageFSPaths:                imageFSPaths,
 		snapshotStore:               snapshotstore.NewStore(),
 		unpackDuplicationSuppressor: kmutex.New(),

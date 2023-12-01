@@ -207,3 +207,7 @@ func snapshotterRemapOpts(nsOpts *runtime.NamespaceOption) ([]snapshots.Opt, err
 	}
 	return snapshotOpt, nil
 }
+
+func IsWindowsSandboxIsolation(ctx context.Context, runtimeOpts interface{}) bool {
+	return false
+}
