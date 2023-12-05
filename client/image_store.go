@@ -157,8 +157,9 @@ func (s *remoteImages) Delete(ctx context.Context, name string, opts ...images.D
 		}
 	*/
 	req := &imagesapi.DeleteImageRequest{
-		Name: name,
-		Sync: do.Synchronous,
+		Name:           name,
+		Sync:           do.Synchronous,
+		RuntimeHandler: do.RuntimeHandler,
 	}
 	if do.Target != nil {
 		req.Target = oci.DescriptorToProto(*do.Target)

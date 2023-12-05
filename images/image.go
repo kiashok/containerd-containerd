@@ -57,8 +57,9 @@ type Image struct {
 
 // DeleteOptions provide options on image delete
 type DeleteOptions struct {
-	Synchronous bool
-	Target      *ocispec.Descriptor
+	Synchronous    bool
+	Target         *ocispec.Descriptor
+	RuntimeHandler string
 }
 
 // DeleteOpt allows configuring a delete operation
@@ -69,6 +70,13 @@ type DeleteOpt func(context.Context, *DeleteOptions) error
 func SynchronousDelete() DeleteOpt {
 	return func(ctx context.Context, o *DeleteOptions) error {
 		o.Synchronous = true
+		return nil
+	}
+}
+
+func RuntimeHandler(runtimeHandler string) DeleteOpt {
+	return func(ctx context.Context, o *DeleteOptions) error {
+		o.RuntimeHandler = runtimeHandler
 		return nil
 	}
 }

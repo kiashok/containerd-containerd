@@ -82,6 +82,10 @@ If foobar.tar contains an OCI ref named "latest" and anonymous ref "sha256:deadb
 			Name:  "platform",
 			Usage: "Imports content for specific platform",
 		},
+		cli.StringFlag{
+			Name:  "runtimehandler",
+			Usage: "Imports content for specific runtimeHandler",
+		},
 		cli.BoolFlag{
 			Name:  "no-unpack",
 			Usage: "Skip unpacking the images, cannot be used with --discard-unpacked-layers, false by default",
