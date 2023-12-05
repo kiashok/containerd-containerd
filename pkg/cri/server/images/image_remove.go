@@ -76,7 +76,7 @@ func (c *CRIImageService) RemoveImage(ctx context.Context, r *runtime.RemoveImag
 		// Remove the label from containerd DB for this image
 		var updatedImg images.Image
 		ctrdImg, err := c.client.ImageService().Get(ctx, ref)
-		if err == nil || errdefs.IsNotFound(err) {
+		if err == nil {
 			// remove the runtimeHandler label from containerd image
 			runtimeHandlerKey := fmt.Sprintf(ctrdlabels.RuntimeHandlerLabelFormat, ctrdlabels.RuntimeHandlerLabelPrefix, runtimeHdlr)
 			if ctrdImg.Labels[runtimeHandlerKey] != "" {
@@ -86,27 +86,30 @@ func (c *CRIImageService) RemoveImage(ctx context.Context, r *runtime.RemoveImag
 					return nil, errors.Wrapf(err, "failed to remove imageRef %v", ref)
 				}
 			}
-			// delete ref from CRI image store
-			err := c.imageStore.DeleteRefWithRuntimeHandler(ctx, ref, runtimeHdlr)
-			// Update image store to reflect the newest state in containerd.
-			if err != nil {
-				return nil, fmt.Errorf("failed to update image reference %q for %q: %w", ref, image.Key.ID, err)
-			}
-
-			if runtimeHandlerLabelExists(updatedImg.Labels) == false {
-				opts = []images.DeleteOpt{images.SynchronousDelete()}
-
-				err = c.client.ImageService().Delete(ctx, ref, opts...)
-				if err == nil || errdefs.IsNotFound(err) {
-					// Update image store to reflect the newest state in containerd.
-					if err := c.imageStore.Update(ctx, ref, runtimeHdlr); err != nil {
-						return nil, fmt.Errorf("failed to update image reference %q for %q: %w", ref, image.Key.ID, err)
-					}
-					continue
-				}
-				return nil, fmt.Errorf("failed to delete image reference %q for %q: %w", ref, image.Key.ID, err)
-			}
 		}
+
+		// delete ref from CRI image store
+		err = c.imageStore.Update(ctx, ref, runtimeHdlr)
+		// Update image store to reflect the newest state in containerd.
+		if err != nil {
+			return nil, fmt.Errorf("failed to update image reference %q for %q: %w", ref, image.Key.ID, err)
+		}
+
+		if !runtimeHandlerLabelExists(updatedImg.Labels) {
+			// we removed the last runtime handler reference, so completely remove this image from containerd store
+			opts = []images.DeleteOpt{images.SynchronousDelete(), images.RuntimeHandler(runtimeHdlr)}
+
+			err = c.client.ImageService().Delete(ctx, ref, opts...)
+			if err == nil || errdefs.IsNotFound(err) {
+				// Update image store to reflect the newest state in containerd.
+				if err := c.imageStore.Update(ctx, ref, runtimeHdlr); err != nil {
+					return nil, fmt.Errorf("failed to update image reference %q for %q: %w", ref, image.Key.ID, err)
+				}
+				continue
+			}
+			return nil, fmt.Errorf("failed to delete image reference %q for %q: %w", ref, image.Key.ID, err)
+		}
+
 	}
 	return &runtime.RemoveImageResponse{}, nil
 }

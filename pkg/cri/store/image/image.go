@@ -26,9 +26,11 @@ import (
 	"github.com/containerd/containerd/v2/errdefs"
 	"github.com/containerd/containerd/v2/images"
 	"github.com/containerd/containerd/v2/images/usage"
+	ctrdlabels "github.com/containerd/containerd/v2/labels"
 	"github.com/containerd/containerd/v2/pkg/cri/labels"
 	"github.com/containerd/containerd/v2/pkg/cri/util"
 	"github.com/containerd/containerd/v2/platforms"
+	"github.com/containerd/log"
 	docker "github.com/distribution/reference"
 	"k8s.io/apimachinery/pkg/util/sets"
 
@@ -113,7 +115,7 @@ type store struct {
 	// are currently using the same digest. With image pull per runtime class,
 	// the same image can now exists for multiple different runtime handlers
 	// imageID -> runtimeHandlers referencing the image
-	imageIDReferences map[string]sets.Set[string]
+	digestReferences map[string]sets.Set[ImageIDKey]
 	// imageDigest -> Key
 	pinnedRefs map[string]sets.Set[RefCacheKey]
 }
@@ -127,12 +129,22 @@ func NewStore(img images.Store, provider InfoProvider, platform platforms.MatchC
 		platform:           platform,
 		platformMatcherMap: platformMatcherMap,
 		store: &store{
-			images:            make(map[ImageIDKey]Image),
-			digestSet:         digestset.NewSet(),
-			imageIDReferences: make(map[string]sets.Set[string]),
-			pinnedRefs:        make(map[string]sets.Set[RefCacheKey]),
+			images:           make(map[ImageIDKey]Image),
+			digestSet:        digestset.NewSet(),
+			digestReferences: make(map[string]sets.Set[ImageIDKey]),
+			pinnedRefs:       make(map[string]sets.Set[RefCacheKey]),
 		},
 	}
+}
+
+func (s *Store) deleteRefWithRuntimeHandler(refCacheKey RefCacheKey) {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+
+	// Remove the reference from the store.
+	s.store.delete(s.refCache[refCacheKey].ID, refCacheKey)
+	delete(s.refCache, refCacheKey)
+	//delete(s.imageIDReferences, runtimeHandler)
 }
 
 // Update updates cache for a reference.
@@ -143,6 +155,15 @@ func (s *Store) Update(ctx context.Context, ref, runtimeHandler string) error {
 	i, err := s.images.Get(ctx, ref)
 	if err != nil && !errdefs.IsNotFound(err) {
 		return fmt.Errorf("get image from containerd: %w", err)
+	}
+	// if the runtimeHandler label does not exist on the image, it means that the
+	// runtime Handler does not reference this image. Therefore remove this ref from the
+	// CRI image store
+	runtimeHandlerImageLabelKey := fmt.Sprintf(ctrdlabels.RuntimeHandlerLabelFormat, ctrdlabels.RuntimeHandlerLabelPrefix, runtimeHandler)
+	if err == nil && i.Labels[runtimeHandlerImageLabelKey] == "" {
+		refCacheKey := RefCacheKey{Ref: ref, RuntimeHandler: runtimeHandler}
+		s.deleteRefWithRuntimeHandler(refCacheKey)
+		return nil
 	}
 
 	var img *Image
@@ -155,35 +176,10 @@ func (s *Store) Update(ctx context.Context, ref, runtimeHandler string) error {
 	return s.update(ref, runtimeHandler, img)
 }
 
-func (s *Store) DeleteRefWithRuntimeHandler(ctx context.Context, ref, runtimeHandler string) error {
-	s.lock.Lock()
-	defer s.lock.Unlock()
-	/*
-		i, err := s.images.Get(ctx, ref)
-		if err != nil && !errdefs.IsNotFound(err) {
-			return fmt.Errorf("get image from containerd: %w", err)
-		}
-
-		var img *Image
-		if err == nil {
-			img, err = s.getImage(ctx, i, runtimeHandler)
-			if err != nil {
-				return fmt.Errorf("get image info from containerd: %w", err)
-			}
-		}
-	*/
-	refCacheKey := RefCacheKey{Ref: ref, RuntimeHandler: runtimeHandler}
-	// Remove the reference from the store.
-	s.store.delete(s.refCache[refCacheKey].ID, refCacheKey)
-	//delete(s.imageIDReferences, runtimeHandler)
-
-	return nil
-}
-
 // update updates the internal cache. img == nil means that
 // the image does not exist in containerd.
 func (s *Store) update(ref string, runtimeHandler string, img *Image) error {
-	refCacheKey := RefCacheKey{Ref: ref, RuntimeHandler: img.Key.RuntimeHandler}
+	refCacheKey := RefCacheKey{Ref: ref, RuntimeHandler: runtimeHandler}
 	//refCacheKey := fmt.Sprintf(imageKeyFormat, ref, runtimeHandler)
 	oldImageIDKey, oldExist := s.refCache[refCacheKey]
 
@@ -268,11 +264,13 @@ func (s *Store) getImage(ctx context.Context, i images.Image, runtimeHandler str
 func (s *Store) Resolve(ref, runtimeHandler string) (string, error) {
 	s.lock.RLock()
 	defer s.lock.RUnlock()
+
 	refCacheKey := RefCacheKey{Ref: ref, RuntimeHandler: runtimeHandler}
 	imageIDKey, ok := s.refCache[refCacheKey]
 	if !ok {
 		return "", errdefs.ErrNotFound
 	}
+	log.G(context.Background()).Debugf("!! Store.Resolve(), returning %v", imageIDKey.ID)
 	return imageIDKey.ID, nil
 }
 
@@ -309,12 +307,12 @@ func (s *store) add(img Image) error {
 		if err := s.digestSet.Add(imagedigest.Digest(img.Key.ID)); err != nil {
 			return err
 		}
+	}
 
-		if len(s.imageIDReferences[img.Key.ID]) == 0 {
-			s.imageIDReferences[img.Key.ID] = sets.New(img.Key.RuntimeHandler)
-		} else {
-			s.imageIDReferences[img.Key.ID].Insert(img.Key.RuntimeHandler)
-		}
+	if len(s.digestReferences[img.Key.ID]) == 0 {
+		s.digestReferences[img.Key.ID] = sets.New(img.Key)
+	} else {
+		s.digestReferences[img.Key.ID].Insert(img.Key)
 	}
 
 	if img.Pinned {
@@ -438,38 +436,23 @@ func (s *store) delete(imageID string, refCacheKey RefCacheKey) {
 		return
 	}
 	imageIDKey := ImageIDKey{ID: digest.String(), RuntimeHandler: refCacheKey.RuntimeHandler}
-	i, ok := s.images[imageIDKey]
-	if !ok {
-		return
-	}
-	i.References = util.SubtractStringSlice(i.References, refCacheKey.Ref)
-	if len(i.References) != 0 {
-		if refs := s.pinnedRefs[digest.String()]; refs != nil {
-			if refs.Delete(refCacheKey); len(refs) == 0 {
-				i.Pinned = false
-				// delete unpinned image, we only need to keep the pinned
-				// entries in the map
-				delete(s.pinnedRefs, digest.String())
-			}
-		}
 
-		s.images[imageIDKey] = i
-		return
+	if refs := s.pinnedRefs[digest.String()]; refs != nil {
+		refs.Delete(refCacheKey)
 	}
 
 	delete(s.images, imageIDKey)
-	// remove runtimeHandler reference from imageIDReferences
-	delete(s.imageIDReferences, refCacheKey.RuntimeHandler)
-
-	// Images can now be pulled per runtime handler. so every image id could
-	// exist for more than one runtimehandler as well.
-	// So only remove the entry from digest set if it is not referenced any more by any runtimeHandler
-	if len(s.imageIDReferences) == 0 {
-		s.digestSet.Remove(digest)
-		delete(s.pinnedRefs, digest.String())
-	}
+	delete(s.digestReferences[imageIDKey.ID], imageIDKey)
 
 	if len(s.pinnedRefs[digest.String()]) == 0 {
 		delete(s.pinnedRefs, digest.String())
 	}
+	// Images can now be pulled per runtime handler. so every image id could
+	// exist for more than one runtimehandler as well.
+	// So only remove the entry from digest set if it is not referenced any more by any runtimeHandler
+	if len(s.digestReferences[imageIDKey.ID]) == 0 {
+		s.digestSet.Remove(digest)
+		delete(s.pinnedRefs, digest.String())
+	}
+	return
 }

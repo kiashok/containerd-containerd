@@ -42,6 +42,10 @@ var restoreCommand = cli.Command{
 			Name:  "live",
 			Usage: "Restore the runtime and memory data from the checkpoint",
 		},
+		cli.StringFlag{
+			Name:  "runtimeHandler",
+			Usage: "runtimeHandler used to pull the image. That is, of the container's pod that is being restored",
+		},
 	},
 	Action: func(context *cli.Context) error {
 		id := context.Args().First()
@@ -52,13 +56,17 @@ var restoreCommand = cli.Command{
 		if ref == "" {
 			return errors.New("ref must be provided")
 		}
+		runtimeHandler := context.String("runtimeHandler")
+		if runtimeHandler == "" {
+			return errors.New("enter runtime handler of the container you are trying to restore")
+		}
 		client, ctx, cancel, err := commands.NewClient(context)
 		if err != nil {
 			return err
 		}
 		defer cancel()
 
-		checkpoint, err := client.GetImage(ctx, ref)
+		checkpoint, err := client.GetImage(ctx, ref, runtimeHandler)
 		if err != nil {
 			if !errdefs.IsNotFound(err) {
 				return err
@@ -80,7 +88,7 @@ var restoreCommand = cli.Command{
 			opts = append(opts, containerd.WithRestoreRW)
 		}
 
-		ctr, err := client.Restore(ctx, id, checkpoint, opts...)
+		ctr, err := client.Restore(ctx, id, checkpoint, runtimeHandler, opts...)
 		if err != nil {
 			return err
 		}

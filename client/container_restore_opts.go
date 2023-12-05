@@ -40,7 +40,7 @@ var (
 )
 
 // RestoreOpts are options to manage the restore operation
-type RestoreOpts func(context.Context, string, *Client, Image, *imagespec.Index) NewContainerOpts
+type RestoreOpts func(context.Context, string, *Client, Image, string, *imagespec.Index) NewContainerOpts
 
 // WithRestoreImage restores the image for the container
 func WithRestoreImage(ctx context.Context, id string, client *Client, checkpoint Image, runtimeHandler string, index *imagespec.Index) NewContainerOpts {
@@ -77,7 +77,7 @@ func WithRestoreImage(ctx context.Context, id string, client *Client, checkpoint
 }
 
 // WithRestoreRuntime restores the runtime for the container
-func WithRestoreRuntime(ctx context.Context, id string, client *Client, checkpoint Image, index *imagespec.Index) NewContainerOpts {
+func WithRestoreRuntime(ctx context.Context, id string, client *Client, checkpoint Image, runtimeHandler string, index *imagespec.Index) NewContainerOpts {
 	return func(ctx context.Context, client *Client, c *containers.Container) error {
 		name, ok := index.Annotations[checkpointRuntimeNameLabel]
 		if !ok {
@@ -112,7 +112,7 @@ func WithRestoreRuntime(ctx context.Context, id string, client *Client, checkpoi
 }
 
 // WithRestoreSpec restores the spec from the checkpoint for the container
-func WithRestoreSpec(ctx context.Context, id string, client *Client, checkpoint Image, index *imagespec.Index) NewContainerOpts {
+func WithRestoreSpec(ctx context.Context, id string, client *Client, checkpoint Image, runtimeHandler string, index *imagespec.Index) NewContainerOpts {
 	return func(ctx context.Context, client *Client, c *containers.Container) error {
 		m, err := GetIndexByMediaType(index, images.MediaTypeContainerd1CheckpointConfig)
 		if err != nil {
@@ -133,7 +133,7 @@ func WithRestoreSpec(ctx context.Context, id string, client *Client, checkpoint 
 }
 
 // WithRestoreRW restores the rw layer from the checkpoint for the container
-func WithRestoreRW(ctx context.Context, id string, client *Client, checkpoint Image, index *imagespec.Index) NewContainerOpts {
+func WithRestoreRW(ctx context.Context, id string, client *Client, checkpoint Image, runtimeHandler string, index *imagespec.Index) NewContainerOpts {
 	return func(ctx context.Context, client *Client, c *containers.Container) error {
 		// apply rw layer
 		rw, err := GetIndexByMediaType(index, imagespec.MediaTypeImageLayerGzip)

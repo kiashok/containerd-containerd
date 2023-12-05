@@ -112,7 +112,8 @@ func (c *CRIImageService) LocalResolve(refOrID, runtimeHandler string) (imagesto
 			if err != nil {
 				return ""
 			}
-			id, err := c.imageStore.Resolve(normalized.String(), runtimeHandler)
+			refString := normalized.String()
+			id, err := c.imageStore.Resolve(refString, runtimeHandler)
 			if err != nil {
 				return ""
 			}

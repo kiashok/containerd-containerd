@@ -543,7 +543,7 @@ func (c *Client) ListImages(ctx context.Context, filters ...string) ([]Image, er
 }
 
 // Restore restores a container from a checkpoint
-func (c *Client) Restore(ctx context.Context, id string, checkpoint Image, opts ...RestoreOpts) (Container, error) {
+func (c *Client) Restore(ctx context.Context, id string, checkpoint Image, runtimeHandler string, opts ...RestoreOpts) (Container, error) {
 	store := c.ContentStore()
 	index, err := decodeIndex(ctx, store, checkpoint.Target())
 	if err != nil {
@@ -558,7 +558,7 @@ func (c *Client) Restore(ctx context.Context, id string, checkpoint Image, opts 
 
 	copts := []NewContainerOpts{}
 	for _, o := range opts {
-		copts = append(copts, o(ctx, id, c, checkpoint, index))
+		copts = append(copts, o(ctx, id, c, checkpoint, runtimeHandler, index))
 	}
 
 	ctr, err := c.NewContainer(ctx, id, copts...)
