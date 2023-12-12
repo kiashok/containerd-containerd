@@ -138,8 +138,8 @@ func NewStore(img images.Store, provider InfoProvider, platform platforms.MatchC
 }
 
 func (s *Store) deleteRefWithRuntimeHandler(refCacheKey RefCacheKey) {
-	s.lock.Lock()
-	defer s.lock.Unlock()
+	//s.lock.Lock()
+	//	defer s.lock.Unlock()
 
 	// Remove the reference from the store.
 	s.store.delete(s.refCache[refCacheKey].ID, refCacheKey)
@@ -162,7 +162,10 @@ func (s *Store) Update(ctx context.Context, ref, runtimeHandler string) error {
 	runtimeHandlerImageLabelKey := fmt.Sprintf(ctrdlabels.RuntimeHandlerLabelFormat, ctrdlabels.RuntimeHandlerLabelPrefix, runtimeHandler)
 	if err == nil && i.Labels[runtimeHandlerImageLabelKey] == "" {
 		refCacheKey := RefCacheKey{Ref: ref, RuntimeHandler: runtimeHandler}
-		s.deleteRefWithRuntimeHandler(refCacheKey)
+		_, ok := s.refCache[refCacheKey]
+		if ok {
+			s.deleteRefWithRuntimeHandler(refCacheKey)
+		}
 		return nil
 	}
 

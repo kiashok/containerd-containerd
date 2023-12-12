@@ -447,6 +447,10 @@ func (c *criService) loadImages(ctx context.Context, cImages []containerd.Image)
 			// an image can exist for more than one runtimeHandler. So make sure that each one of them
 			// is restored
 			runtimeHandlerLabels := getAllRuntimeHandlerLabels(i)
+			if len(runtimeHandlerLabels) == 0 {
+				log.G(ctx).Errorf("No runtimehandler labels set for the image for %q", i.Name())
+				return
+			}
 			for _, runtimeHandler := range runtimeHandlerLabels {
 				ok, _, _, _, err := containerdimages.Check(ctx, i.ContentStore(), i.Target(), c.platformMatcherMap[runtimeHandler])
 				if err != nil {
