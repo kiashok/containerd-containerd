@@ -485,6 +485,22 @@ func (c *Client) GetImage(ctx context.Context, ref string) (Image, error) {
 	return NewImage(c, i), nil
 }
 
+// GetImage returns an existing image
+func (c *Client) GetImageWithPlatform(ctx context.Context, ref string, runtimeHandlerPlatform string) (Image, error) {
+	i, err := c.ImageService().Get(ctx, ref)
+	if err != nil {
+		return nil, err
+	}
+	if runtimeHandlerPlatform != "" {
+		var platform ocispec.Platform
+		if err := json.Unmarshal([]byte(runtimeHandlerPlatform), &platform); err != nil {
+			return nil, fmt.Errorf("unable to unmarshal runtimeHandlerPlatform %v", runtimeHandlerPlatform)
+		}
+		return NewImageWithPlatform(c, i, platforms.Only(platform)), nil
+	}
+	return NewImage(c, i), nil
+}
+
 // ListImages returns all existing images
 func (c *Client) ListImages(ctx context.Context, filters ...string) ([]Image, error) {
 	imgs, err := c.ImageService().List(ctx, filters...)

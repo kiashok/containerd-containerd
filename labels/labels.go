@@ -29,6 +29,6 @@ const LabelSharedNamespace = "containerd.io/namespace.shareable"
 const LabelDistributionSource = "containerd.io/distribution.source"
 
 // PlatformsForImagePull is common prefix for specifying platforms used for pulling images
-const PlatformsForImagePull = "containerd.io/imagePullPlatforms"
+const PlatformsForImagePullPrefix = "containerd.io/imagePullPlatforms"
 
 const PlatformsForImagePullFormat = "%s.%s"

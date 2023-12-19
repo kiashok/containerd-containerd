@@ -174,7 +174,7 @@ func ParseAll(specifiers []string) ([]specs.Platform, error) {
 
 // Parse parses the platform specifier syntax into a platform declaration.
 //
-// Platform specifiers are in the format `<os>|<arch>|<os>/<arch>[/<variant>]`.
+// Platform specifiers are in the format `<os>|<arch>|<os>/<arch>[/<variant>]|<os>/<arch>[/<variant>/</<osversion>]`.
 // The minimum required information for a platform specifier is the operating
 // system or architecture. If there is only a single string (no slashes), the
 // value will be matched against the known set of operating systems, then fall
@@ -254,6 +254,19 @@ func Parse(specifier string) (specs.Platform, error) {
 		}
 
 		return p, nil
+	case 4:
+		// we have a fully specified variant, this is rare
+		p.OS = normalizeOS(parts[0])
+		p.Architecture, p.Variant = normalizeArch(parts[1], parts[2])
+		if p.Architecture == "arm64" && p.Variant == "" {
+			p.Variant = "v8"
+		}
+
+		if p.OS == "windows" {
+			p.OSVersion = parts[3]
+		}
+
+		return p, nil
 	}
 
 	return specs.Platform{}, fmt.Errorf("%q: cannot parse platform specifier: %w", specifier, errInvalidArgument)
@@ -275,7 +288,7 @@ func Format(platform specs.Platform) string {
 		return "unknown"
 	}
 
-	return path.Join(platform.OS, platform.Architecture, platform.Variant)
+	return path.Join(platform.OS, platform.Architecture, platform.Variant, platform.OSVersion)
 }
 
 // Normalize validates and translate the platform to the canonical value.

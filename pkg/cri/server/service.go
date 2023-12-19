@@ -73,7 +73,7 @@ type imageService interface {
 
 	RuntimeSnapshotter(ctx context.Context, ociRuntime criconfig.Runtime) string
 
-	UpdateImage(ctx context.Context, r string) error
+	UpdateImage(ctx context.Context, r string, runtimeHandlerPlatform string) error
 
 	GetImage(id string) (imagestore.Image, error)
 	GetSnapshot(key, snapshotter string) (snapshotstore.Snapshot, error)
