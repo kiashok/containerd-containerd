@@ -27,3 +27,8 @@ const LabelSharedNamespace = "containerd.io/namespace.shareable"
 // LabelDistributionSource is added to content to indicate its origin.
 // e.g., "containerd.io/distribution.source.docker.io=library/redis"
 const LabelDistributionSource = "containerd.io/distribution.source"
+
+// PlatformsForImagePull is common prefix for specifying platforms used for pulling images
+const PlatformsForImagePull = "containerd.io/imagePullPlatforms"
+
+const PlatformsForImagePullFormat = "%s.%s"
