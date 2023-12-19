@@ -363,13 +363,13 @@ func (em *eventMonitor) handleEvent(any interface{}) error {
 		}
 	case *eventtypes.ImageCreate:
 		log.L.Infof("ImageCreate event %+v", e)
-		return em.c.UpdateImage(ctx, e.Name)
+		return em.c.UpdateImage(ctx, e.Name, e.Platform)
 	case *eventtypes.ImageUpdate:
 		log.L.Infof("ImageUpdate event %+v", e)
-		return em.c.UpdateImage(ctx, e.Name)
+		return em.c.UpdateImage(ctx, e.Name, e.Platform)
 	case *eventtypes.ImageDelete:
 		log.L.Infof("ImageDelete event %+v", e)
-		return em.c.UpdateImage(ctx, e.Name)
+		return em.c.UpdateImage(ctx, e.Name, e.Platform)
 	}
 
 	return nil

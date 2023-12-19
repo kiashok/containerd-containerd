@@ -18,10 +18,12 @@ package client
 
 import (
 	"context"
+	"strings"
 
 	imagesapi "github.com/containerd/containerd/v2/api/services/images/v1"
 	"github.com/containerd/containerd/v2/errdefs"
 	"github.com/containerd/containerd/v2/images"
+	ctrdlabels "github.com/containerd/containerd/v2/labels"
 	"github.com/containerd/containerd/v2/oci"
 	"github.com/containerd/containerd/v2/pkg/epoch"
 	"github.com/containerd/containerd/v2/protobuf"
@@ -63,9 +65,21 @@ func (s *remoteImages) List(ctx context.Context, filters ...string) ([]images.Im
 }
 
 func (s *remoteImages) Create(ctx context.Context, image images.Image) (images.Image, error) {
-	req := &imagesapi.CreateImageRequest{
-		Image: imageToProto(&image),
+	// get list of platforms that the image needs to be pulled for from
+	// the image's label
+	var platforms string
+	for labelKey, labelValue := range image.Labels {
+		if strings.HasPrefix(labelKey, ctrdlabels.PlatformsForImagePullPrefix) {
+			platforms = labelValue
+			break
+		}
 	}
+
+	req := &imagesapi.CreateImageRequest{
+		Image:    imageToProto(&image),
+		Platform: platforms,
+	}
+
 	if tm := epoch.FromContext(ctx); tm != nil {
 		req.SourceDateEpoch = timestamppb.New(*tm)
 	}
