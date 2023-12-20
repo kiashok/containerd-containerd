@@ -91,6 +91,9 @@ message CreateImageRequest {
 	Image image = 1;
 
 	google.protobuf.Timestamp source_date_epoch = 2;
+		
+	// platform that this image is being pulled for currently
+	string platform = 3;
 }
 
 message CreateImageResponse {
@@ -108,6 +111,9 @@ message UpdateImageRequest {
 	google.protobuf.FieldMask update_mask = 2;
 
 	google.protobuf.Timestamp source_date_epoch = 3;
+
+	// platform that this image is being pulled for currently
+	string platform = 4;
 }
 
 message UpdateImageResponse {
@@ -146,4 +152,7 @@ message DeleteImageRequest {
 	// If image descriptor does not match the same digest,
 	// the delete operation will return "not found" error.
 	optional containerd.types.Descriptor target = 3;
+
+	// platform that this image is being pulled for currently
+	string platform = 4;
 }
