@@ -18,10 +18,12 @@ package images
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/containerd/containerd/v2/errdefs"
 	"github.com/containerd/containerd/v2/images"
+	"github.com/containerd/containerd/v2/platforms"
 	"github.com/containerd/containerd/v2/tracing"
 
 	runtime "k8s.io/cri-api/pkg/apis/runtime/v1"
@@ -35,7 +37,29 @@ import (
 // semantic defined in CRI now.
 func (c *CRIImageService) RemoveImage(ctx context.Context, r *runtime.RemoveImageRequest) (*runtime.RemoveImageResponse, error) {
 	span := tracing.SpanFromContext(ctx)
-	image, err := c.LocalResolve(r.GetImage().GetImage())
+
+	// Get runtime handler from pull request or use defaut runtime class name if one
+	// was not specified
+	runtimeHdlr := r.GetImage().GetRuntimeHandler()
+	if runtimeHdlr == "" {
+		runtimeHdlr = c.config.ContainerdConfig.DefaultRuntimeName
+	}
+	// validate the runtimehandler to use for this image pull
+	_, ok := c.config.ContainerdConfig.Runtimes[runtimeHdlr]
+	if !ok {
+		return nil, fmt.Errorf("no runtime for %q is configured", runtimeHdlr)
+	}
+	// get the platform associated with this runtime handler and set label
+	runtimeHandlerPlatform := platforms.DefaultSpec()
+	platform, ok := c.runtimeHandlerToPlatformMap[runtimeHdlr]
+	if ok {
+		runtimeHandlerPlatform = platform
+	}
+
+	data, _ := json.Marshal(runtimeHandlerPlatform)
+	runtimeHandlerPlatformString := string(data)
+
+	image, err := c.LocalResolve(r.GetImage().GetImage(), runtimeHandlerPlatformString)
 	if err != nil {
 		if errdefs.IsNotFound(err) {
 			span.AddEvent(err.Error())
@@ -44,7 +68,7 @@ func (c *CRIImageService) RemoveImage(ctx context.Context, r *runtime.RemoveImag
 		}
 		return nil, fmt.Errorf("can not resolve %q locally: %w", r.GetImage().GetImage(), err)
 	}
-	span.SetAttributes(tracing.Attribute("image.id", image.ID))
+	span.SetAttributes(tracing.Attribute("image.id", image.Key.ID))
 	// Remove all image references.
 	for i, ref := range image.References {
 		var opts []images.DeleteOpt
@@ -57,12 +81,12 @@ func (c *CRIImageService) RemoveImage(ctx context.Context, r *runtime.RemoveImag
 		err = c.client.ImageService().Delete(ctx, ref, opts...)
 		if err == nil || errdefs.IsNotFound(err) {
 			// Update image store to reflect the newest state in containerd.
-			if err := c.imageStore.Update(ctx, ref); err != nil {
-				return nil, fmt.Errorf("failed to update image reference %q for %q: %w", ref, image.ID, err)
+			if err := c.imageStore.Update(ctx, ref, runtimeHandlerPlatformString); err != nil {
+				return nil, fmt.Errorf("failed to update image reference %q for %q: %w", ref, image.Key.ID, err)
 			}
 			continue
 		}
-		return nil, fmt.Errorf("failed to delete image reference %q for %q: %w", ref, image.ID, err)
+		return nil, fmt.Errorf("failed to delete image reference %q for %q: %w", ref, image.Key.ID, err)
 	}
 	return &runtime.RemoveImageResponse{}, nil
 }

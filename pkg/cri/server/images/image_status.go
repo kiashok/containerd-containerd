@@ -25,6 +25,7 @@ import (
 
 	"github.com/containerd/containerd/v2/errdefs"
 	imagestore "github.com/containerd/containerd/v2/pkg/cri/store/image"
+	"github.com/containerd/containerd/v2/platforms"
 	"github.com/containerd/containerd/v2/tracing"
 	"github.com/containerd/log"
 	docker "github.com/distribution/reference"
@@ -38,7 +39,29 @@ import (
 // kubernetes/kubernetes#46255)
 func (c *CRIImageService) ImageStatus(ctx context.Context, r *runtime.ImageStatusRequest) (*runtime.ImageStatusResponse, error) {
 	span := tracing.SpanFromContext(ctx)
-	image, err := c.LocalResolve(r.GetImage().GetImage())
+
+	// Get runtime handler from pull request or use defaut runtime class name if one
+	// was not specified
+	runtimeHdlr := r.GetImage().GetRuntimeHandler()
+	if runtimeHdlr == "" {
+		runtimeHdlr = c.config.ContainerdConfig.DefaultRuntimeName
+	}
+	// validate the runtimehandler to use for this image pull
+	_, ok := c.config.ContainerdConfig.Runtimes[runtimeHdlr]
+	if !ok {
+		return nil, fmt.Errorf("no runtime for %q is configured", runtimeHdlr)
+	}
+	// get the platform associated with this runtime handler and set label
+	runtimeHandlerPlatform := platforms.DefaultSpec()
+	platform, ok := c.runtimeHandlerToPlatformMap[runtimeHdlr]
+	if ok {
+		runtimeHandlerPlatform = platform
+	}
+
+	data, _ := json.Marshal(runtimeHandlerPlatform)
+	runtimeHandlerPlatformString := string(data)
+
+	image, err := c.LocalResolve(r.GetImage().GetImage(), runtimeHandlerPlatformString)
 	if err != nil {
 		if errdefs.IsNotFound(err) {
 			span.AddEvent(err.Error())
@@ -47,11 +70,12 @@ func (c *CRIImageService) ImageStatus(ctx context.Context, r *runtime.ImageStatu
 		}
 		return nil, fmt.Errorf("can not resolve %q locally: %w", r.GetImage().GetImage(), err)
 	}
-	span.SetAttributes(tracing.Attribute("image.id", image.ID))
+	span.SetAttributes(tracing.Attribute("image.id", image.Key.ID))
 	// TODO(random-liu): [P0] Make sure corresponding snapshot exists. What if snapshot
 	// doesn't exist?
 
 	runtimeImage := toCRIImage(image)
+	runtimeImage.Spec = &runtime.ImageSpec{RuntimeHandler: runtimeHdlr}
 	info, err := c.toCRIImageInfo(ctx, &image, r.GetVerbose())
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate image info: %w", err)
@@ -67,7 +91,7 @@ func (c *CRIImageService) ImageStatus(ctx context.Context, r *runtime.ImageStatu
 func toCRIImage(image imagestore.Image) *runtime.Image {
 	repoTags, repoDigests := ParseImageReferences(image.References)
 	runtimeImage := &runtime.Image{
-		Id:          image.ID,
+		Id:          image.Key.ID,
 		RepoTags:    repoTags,
 		RepoDigests: repoDigests,
 		Size_:       uint64(image.Size),

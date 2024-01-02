@@ -75,10 +75,10 @@ type imageService interface {
 
 	UpdateImage(ctx context.Context, r string, runtimeHandlerPlatform string) error
 
-	GetImage(id string) (imagestore.Image, error)
+	GetImage(id, platform string) (imagestore.Image, error)
 	GetSnapshot(key, snapshotter string) (snapshotstore.Snapshot, error)
 
-	LocalResolve(refOrID string) (imagestore.Image, error)
+	LocalResolve(refOrID, platform string) (imagestore.Image, error)
 
 	ImageFSPaths() map[string]string
 }

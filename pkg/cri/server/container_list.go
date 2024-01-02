@@ -18,6 +18,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	runtime "k8s.io/cri-api/pkg/apis/runtime/v1"
@@ -33,7 +34,13 @@ func (c *criService) ListContainers(ctx context.Context, r *runtime.ListContaine
 
 	var containers []*runtime.Container
 	for _, container := range containersInStore {
-		containers = append(containers, toCRIContainer(container))
+		sandbox, err := c.sandboxStore.Get(container.SandboxID)
+		if err != nil {
+			return nil, fmt.Errorf("unable to fine sandbox for containerd %v", container.ID)
+		}
+		criContainer := toCRIContainer(container)
+		criContainer.Image.RuntimeHandler = sandbox.RuntimeHandler
+		containers = append(containers, criContainer)
 	}
 
 	containers = c.filterCRIContainers(containers, r.GetFilter())
@@ -77,10 +84,12 @@ func (c *criService) filterCRIContainers(containers []*runtime.Container, filter
 	// match. So we do a lookup against the store here if a pod id has been
 	// included in the filter.
 	sb := filter.GetPodSandboxId()
+	runtimeHandler := ""
 	if sb != "" {
 		sandbox, err := c.sandboxStore.Get(sb)
 		if err == nil {
 			sb = sandbox.ID
+			runtimeHandler = sandbox.RuntimeHandler
 		}
 	}
 
@@ -96,6 +105,7 @@ func (c *criService) filterCRIContainers(containers []*runtime.Container, filter
 		if filter.GetState() != nil && filter.GetState().GetState() != cntr.State {
 			continue
 		}
+		cntr.Image.RuntimeHandler = runtimeHandler
 		if filter.GetLabelSelector() != nil {
 			match := true
 			for k, v := range filter.GetLabelSelector() {

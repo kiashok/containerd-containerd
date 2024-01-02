@@ -18,6 +18,7 @@ package config
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -31,6 +32,7 @@ import (
 	"github.com/containerd/containerd/v2/pkg/cri/annotations"
 	"github.com/containerd/containerd/v2/pkg/deprecation"
 	runtimeoptions "github.com/containerd/containerd/v2/pkg/runtimeoptions/v1"
+	"github.com/containerd/containerd/v2/platforms"
 	"github.com/containerd/containerd/v2/plugins"
 	runcoptions "github.com/containerd/containerd/v2/runtime/v2/runc/options"
 	runtime "k8s.io/cri-api/pkg/apis/runtime/v1"
@@ -585,4 +587,29 @@ func getRuntimeOptionsType(t string) interface{} {
 	default:
 		return &runtimeoptions.Options{}
 	}
+}
+
+func GetPlatformForRuntimeHandler(config ContainerdConfig, runtimeHandler string) (string, error) {
+	// Get runtime handler from pull request or use defaut runtime class name if one
+	// was not specified
+	runtimeHdlr := runtimeHandler
+	if runtimeHdlr == "" {
+		runtimeHdlr = config.DefaultRuntimeName
+	}
+	// validate the runtimehandler to use for this image pull
+	_, ok := config.Runtimes[runtimeHdlr]
+	if !ok {
+		return "", fmt.Errorf("no runtime for %q is configured", runtimeHdlr)
+	}
+	// get the platform associated with this runtime handler and set label
+	runtimeHandlerPlatform := platforms.DefaultSpec()
+	runtime, ok := config.Runtimes[runtimeHdlr]
+	if ok {
+		runtimeHandlerPlatform = runtime.Platform
+	}
+
+	data, _ := json.Marshal(runtimeHandlerPlatform)
+	runtimeHandlerPlatformString := string(data)
+
+	return runtimeHandlerPlatformString, nil
 }
