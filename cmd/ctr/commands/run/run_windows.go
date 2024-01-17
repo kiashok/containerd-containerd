@@ -126,7 +126,7 @@ func NewContainer(ctx gocontext.Context, client *containerd.Client, context *cli
 			return nil, errors.New("Cannot use host mode networking with Windows containers")
 		}
 		if context.Bool("cni") {
-			ns, err := netns.NewNetNS("")
+			ns, err := netns.NewNetNS("", nil)
 			if err != nil {
 				return nil, err
 			}

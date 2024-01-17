@@ -177,7 +177,7 @@ type NetNS struct {
 }
 
 // NewNetNS creates a network namespace.
-func NewNetNS(baseDir string) (*NetNS, error) {
+func NewNetNS(baseDir string, annotations map[string]string) (*NetNS, error) {
 	return NewNetNSFromPID(baseDir, 0)
 }
 
