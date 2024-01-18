@@ -298,7 +298,10 @@ func (c *Client) createNewImage(ctx context.Context, img images.Image) (images.I
 				return images.Image{}, err
 			}
 
-			updated, err := is.Update(ctx, img)
+			updated, err := is.Update(ctx, img) // This will lead to publishing an event that will
+			// evetually call CRIImageService.UpdateImage(). Should the containerd client also have
+			// the event publisher field in it so we can pass runtimeHandler information to it?
+			// same on line 296 above.
 			if err != nil {
 				// if image was removed, try create again
 				if errdefs.IsNotFound(err) {

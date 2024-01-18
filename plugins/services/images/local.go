@@ -136,6 +136,9 @@ func (l *local) Create(ctx context.Context, req *imagesapi.CreateImageRequest, _
 
 	resp.Image = imageToProto(&created)
 
+	// Is the goal of adding publish events in CRIImageService.UpdateImage() to ultimately
+	// remove publishing of events from this file and have callers of the functions in this file
+	// deal with it?
 	if err := l.publisher.Publish(ctx, "/images/create", &eventstypes.ImageCreate{
 		Name:   resp.Image.Name,
 		Labels: resp.Image.Labels,
@@ -175,6 +178,9 @@ func (l *local) Update(ctx context.Context, req *imagesapi.UpdateImageRequest, _
 
 	resp.Image = imageToProto(&updated)
 
+	// (kiashok): Is the goal of adding publish events in CRIImageService.UpdateImage() to ultimately
+	// remove publishing of events from this file and have callers of the functions in this file
+	// deal with it?
 	if err := l.publisher.Publish(ctx, "/images/update", &eventstypes.ImageUpdate{
 		Name:   resp.Image.Name,
 		Labels: resp.Image.Labels,

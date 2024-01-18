@@ -326,6 +326,7 @@ func (c *CRIImageService) createImageReference(ctx context.Context, name string,
 			if err := c.publisher.Publish(ctx, "/images/create", &eventstypes.ImageCreate{
 				Name:   img.Name,
 				Labels: img.Labels,
+				// Add member for runtimehandler so the call to CRIImageService.UpdateImage() has runtimeHandler?
 			}); err != nil {
 				return err
 			}
@@ -343,6 +344,7 @@ func (c *CRIImageService) createImageReference(ctx context.Context, name string,
 			if err := c.publisher.Publish(ctx, "/images/update", &eventstypes.ImageUpdate{
 				Name:   img.Name,
 				Labels: img.Labels,
+				// Add member for runtimehandler?
 			}); err != nil {
 				return err
 			}
@@ -365,7 +367,7 @@ func (c *CRIImageService) getLabels(ctx context.Context, name string) map[string
 // updateImage updates image store to reflect the newest state of an image reference
 // in containerd. If the reference is not managed by the cri plugin, the function also
 // generates necessary metadata for the image and make it managed.
-func (c *CRIImageService) UpdateImage(ctx context.Context, r string) error {
+func (c *CRIImageService) UpdateImage(ctx context.Context, r string /*, runtimeHandler string */) error {
 	// TODO: Use image service
 	img, err := c.client.GetImage(ctx, r)
 	if err != nil && !errdefs.IsNotFound(err) {
