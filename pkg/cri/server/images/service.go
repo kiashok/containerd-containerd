@@ -18,12 +18,14 @@ package images
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	containerd "github.com/containerd/containerd/v2/client"
 	"github.com/containerd/containerd/v2/core/content"
 	"github.com/containerd/containerd/v2/core/images"
 	"github.com/containerd/containerd/v2/core/snapshots"
+	"github.com/containerd/containerd/v2/defaults"
 	"github.com/containerd/containerd/v2/internal/kmutex"
 	criconfig "github.com/containerd/containerd/v2/pkg/cri/config"
 	imagestore "github.com/containerd/containerd/v2/pkg/cri/store/image"
@@ -128,7 +130,17 @@ func NewService(config criconfig.ImageConfig, options *CRIImageServiceOptions) (
 
 // LocalResolve resolves image reference locally and returns corresponding image metadata. It
 // returns errdefs.ErrNotFound if the reference doesn't exist.
-func (c *CRIImageService) LocalResolve(refOrID string) (imagestore.Image, error) {
+func (c *CRIImageService) LocalResolve(refOrID string, runtimeHandler string) (imagestore.Image, error) {
+	// if empty runtimeHandler was passed, use default runtimeHandler
+	if runtimeHandler == "" {
+		runtimeHandler = defaults.DefaultRuntimeName
+	}
+	// validate the runtimehandler to use for this image pull
+	_, ok := c.runtimePlatforms[runtimeHandler]
+	if !ok {
+		return imagestore.Image{}, fmt.Errorf("no runtime for %q is configured", runtimeHandler)
+	}
+
 	getImageID := func(refOrId string) string {
 		if _, err := imagedigest.Parse(refOrID); err == nil {
 			return refOrID
@@ -169,7 +181,17 @@ func (c *CRIImageService) RuntimeSnapshotter(ctx context.Context, ociRuntime cri
 }
 
 // GetImage gets image metadata by image id.
-func (c *CRIImageService) GetImage(id string) (imagestore.Image, error) {
+func (c *CRIImageService) GetImage(id string, runtimeHandler string) (imagestore.Image, error) {
+	// if empty runtimeHandler was passed, use default runtimeHandler
+	if runtimeHandler == "" {
+		runtimeHandler = defaults.DefaultRuntimeName
+	}
+	// validate the runtimehandler to use for this image pull
+	_, ok := c.runtimePlatforms[runtimeHandler]
+	if !ok {
+		return imagestore.Image{}, fmt.Errorf("no runtime for %q is configured", runtimeHandler)
+	}
+
 	return c.imageStore.Get(id)
 }
 

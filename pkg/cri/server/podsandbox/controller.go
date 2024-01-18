@@ -101,10 +101,11 @@ type CRIService interface {
 
 // ImageService specifies dependencies to CRI image service.
 type ImageService interface {
-	LocalResolve(refOrID string) (imagestore.Image, error)
-	GetImage(id string) (imagestore.Image, error)
+	LocalResolve(refOrID string, runtimeHandler string) (imagestore.Image, error)
+	GetImage(id string, runtimeHandler string) (imagestore.Image, error)
 	PullImage(ctx context.Context, name string, creds func(string) (string, string, error), sc *runtime.PodSandboxConfig) (string, error)
 	RuntimeSnapshotter(ctx context.Context, ociRuntime criconfig.Runtime) string
+	// TODO: RuntimePlatform() ?
 	PinnedImage(string) string
 }
 

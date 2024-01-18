@@ -34,4 +34,6 @@ const (
 	DefaultFIFODir = "/run/containerd/fifo"
 	// DefaultConfigDir is the default location for config files.
 	DefaultConfigDir = "/etc/containerd"
+	// DefaultRuntimeName is the default runtime handler
+	DefaultRuntimeName = "runc"
 )

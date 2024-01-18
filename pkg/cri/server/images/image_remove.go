@@ -38,7 +38,7 @@ func (c *GRPCCRIImageService) RemoveImage(ctx context.Context, r *runtime.Remove
 	span := tracing.SpanFromContext(ctx)
 
 	// TODO: Move to separate function
-	image, err := c.LocalResolve(r.GetImage().GetImage())
+	image, err := c.LocalResolve(r.GetImage().GetImage(), "" /* runtimeHandler is passed in from cri in 1.29 */)
 	if err != nil {
 		if errdefs.IsNotFound(err) {
 			span.AddEvent(err.Error())
