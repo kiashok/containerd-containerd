@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"golang.org/x/sync/semaphore"
@@ -29,6 +30,7 @@ import (
 	"github.com/containerd/containerd/v2/core/remotes/docker"
 	"github.com/containerd/containerd/v2/core/remotes/docker/schema1" //nolint:staticcheck // Ignore SA1019. Need to keep deprecated package for compatibility.
 	"github.com/containerd/containerd/v2/pkg/errdefs"
+	ctrdLabels "github.com/containerd/containerd/v2/pkg/labels"
 	"github.com/containerd/containerd/v2/pkg/tracing"
 	"github.com/containerd/containerd/v2/pkg/unpack"
 	"github.com/containerd/containerd/v2/platforms"
@@ -281,6 +283,18 @@ func (c *Client) fetch(ctx context.Context, rCtx *RemoteContext, ref string, lim
 		rCtx.Labels[images.ConvertedDockerSchema1LabelKey] = originalSchema1Digest
 	}
 
+	// Set this from CRI or ctr pull based on the platform that the image needs to be pulled from.
+	// if none is set, we will add the label for default runtime handler
+	if len(rCtx.Platforms) == 1 {
+		platformLabel := fmt.Sprintf(ctrdLabels.PullImagePlatformLabelFormat, ctrdLabels.PullImagePlatformLabelPrefix, rCtx.Platforms[0])
+		rCtx.Labels[platformLabel] = rCtx.Snapshotter
+	} else {
+		defaultRuntime := platforms.Format(platforms.DefaultSpec())
+		platformLabel := fmt.Sprintf(ctrdLabels.PullImagePlatformLabelFormat, ctrdLabels.PullImagePlatformLabelPrefix, defaultRuntime)
+		rCtx.Labels[platformLabel] = rCtx.Snapshotter
+	}
+
+	// TODO(kiashok): set platformForPullImage here?! this function is also eventually called from ctr pull as well
 	return images.Image{
 		Name:   name,
 		Target: desc,
@@ -298,10 +312,25 @@ func (c *Client) createNewImage(ctx context.Context, img images.Image) (images.I
 				return images.Image{}, err
 			}
 
-			updated, err := is.Update(ctx, img) // This will lead to publishing an event that will
-			// evetually call CRIImageService.UpdateImage(). Should the containerd client also have
-			// the event publisher field in it so we can pass runtimeHandler information to it?
-			// same on line 296 above.
+			// get platform label the img
+			platformLabelKey := ""
+			for labelKey := range img.Labels {
+				if strings.HasPrefix(labelKey, ctrdLabels.PullImagePlatformLabelPrefix) {
+					platformLabelKey = labelKey
+					break
+				}
+			}
+			var updated images.Image
+			var err error
+			if platformLabelKey != "" {
+				updated, err = is.Update(ctx, img, "labels."+platformLabelKey)
+			} else {
+				updated, err = is.Update(ctx, img) // This will lead to publishing an event that will
+				// evetually call CRIImageService.UpdateImage(). Should the containerd client also have
+				// the event publisher field in it so we can pass runtimeHandler information to it?
+				// same on line 296 above.
+			}
+
 			if err != nil {
 				// if image was removed, try create again
 				if errdefs.IsNotFound(err) {

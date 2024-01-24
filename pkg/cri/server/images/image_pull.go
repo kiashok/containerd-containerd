@@ -36,6 +36,7 @@ import (
 	distribution "github.com/distribution/reference"
 	imagedigest "github.com/opencontainers/go-digest"
 	imagespec "github.com/opencontainers/image-spec/specs-go/v1"
+	"github.com/pkg/errors"
 	runtime "k8s.io/cri-api/pkg/apis/runtime/v1"
 
 	eventstypes "github.com/containerd/containerd/v2/api/events"
@@ -44,12 +45,15 @@ import (
 	containerdimages "github.com/containerd/containerd/v2/core/images"
 	"github.com/containerd/containerd/v2/core/remotes/docker"
 	"github.com/containerd/containerd/v2/core/remotes/docker/config"
+	"github.com/containerd/containerd/v2/defaults"
 	"github.com/containerd/containerd/v2/pkg/cri/annotations"
 	criconfig "github.com/containerd/containerd/v2/pkg/cri/config"
 	crilabels "github.com/containerd/containerd/v2/pkg/cri/labels"
 	"github.com/containerd/containerd/v2/pkg/errdefs"
+	ctrdLabels "github.com/containerd/containerd/v2/pkg/labels"
 	snpkg "github.com/containerd/containerd/v2/pkg/snapshotters"
 	"github.com/containerd/containerd/v2/pkg/tracing"
+	"github.com/containerd/containerd/v2/platforms"
 )
 
 // For image management:
@@ -177,6 +181,13 @@ func (c *CRIImageService) PullImage(ctx context.Context, name string, credential
 		tracing.Attribute("snapshotter.name", snapshotter),
 	)
 
+	runtimeHandler, err := c.runtimeHandlerFromPodSandboxConfig(ctx, ref, sandboxConfig)
+	if err != nil {
+		return "", errors.Wrapf(err, "failed to get runtime handler from pod sandbox config")
+	}
+
+	pullImageWithPlatform := c.runtimePlatforms[runtimeHandler].Platform
+
 	labels := c.getLabels(ctx, ref)
 
 	pullOpts := []containerd.RemoteOpt{
@@ -191,6 +202,8 @@ func (c *CRIImageService) PullImage(ctx context.Context, name string, credential
 			containerd.WithUnpackDuplicationSuppressor(c.unpackDuplicationSuppressor),
 			containerd.WithUnpackApplyOpts(diff.WithSyncFs(c.config.ImagePullWithSyncFs)),
 		}),
+		containerd.WithPlatform(platforms.Format(pullImageWithPlatform)),
+		containerd.WithPlatformMatcher(platforms.Only(pullImageWithPlatform)),
 	}
 
 	// Temporarily removed for v2 upgrade
@@ -225,7 +238,7 @@ func (c *CRIImageService) PullImage(ctx context.Context, name string, credential
 		if r == "" {
 			continue
 		}
-		if err := c.createImageReference(ctx, r, image.Target(), labels); err != nil {
+		if err := c.createImageReference(ctx, r, pullImageWithPlatform, image.Target(), image.Labels()); err != nil {
 			return "", fmt.Errorf("failed to create image reference %q: %w", r, err)
 		}
 		// Update image store to reflect the newest state in containerd.
@@ -310,13 +323,14 @@ func ParseAuth(auth *runtime.AuthConfig, host string) (string, string, error) {
 // Note that because create and update are not finished in one transaction, there could be race. E.g.
 // the image reference is deleted by someone else after create returns already exists, but before update
 // happens.
-func (c *CRIImageService) createImageReference(ctx context.Context, name string, desc imagespec.Descriptor, labels map[string]string) error {
+func (c *CRIImageService) createImageReference(ctx context.Context, name string, pullImageWithPlatform imagespec.Platform, desc imagespec.Descriptor, labels map[string]string) error {
 	img := containerdimages.Image{
 		Name:   name,
 		Target: desc,
 		// Add a label to indicate that the image is managed by the cri plugin.
 		Labels: labels,
 	}
+
 	// TODO(random-liu): Figure out which is the more performant sequence create then update or
 	// update then create.
 	// TODO: Call CRIImageService directly
@@ -324,8 +338,9 @@ func (c *CRIImageService) createImageReference(ctx context.Context, name string,
 	if err == nil {
 		if c.publisher != nil {
 			if err := c.publisher.Publish(ctx, "/images/create", &eventstypes.ImageCreate{
-				Name:   img.Name,
-				Labels: img.Labels,
+				Name:     img.Name,
+				Labels:   img.Labels,
+				Platform: pullImageWithPlatform,
 				// Add member for runtimehandler so the call to CRIImageService.UpdateImage() has runtimeHandler?
 			}); err != nil {
 				return err
@@ -335,15 +350,18 @@ func (c *CRIImageService) createImageReference(ctx context.Context, name string,
 	} else if !errdefs.IsAlreadyExists(err) {
 		return err
 	}
+	// TODO(kiashok): next two lines dead code- if image already exists, oldImg is always returned empty
 	if oldImg.Target.Digest == img.Target.Digest && oldImg.Labels[crilabels.ImageLabelKey] == labels[crilabels.ImageLabelKey] {
 		return nil
 	}
-	_, err = c.images.Update(ctx, img, "target", "labels."+crilabels.ImageLabelKey)
+	platformLabel := fmt.Sprintf(ctrdLabels.PullImagePlatformLabelFormat, ctrdLabels.PullImagePlatformLabelPrefix, platforms.Format(pullImageWithPlatform))
+	_, err = c.images.Update(ctx, img, "target", "labels."+crilabels.ImageLabelKey, "labels."+platformLabel)
 	if err == nil && c.publisher != nil {
 		if c.publisher != nil {
 			if err := c.publisher.Publish(ctx, "/images/update", &eventstypes.ImageUpdate{
-				Name:   img.Name,
-				Labels: img.Labels,
+				Name:     img.Name,
+				Labels:   img.Labels,
+				Platform: pullImageWithPlatform,
 				// Add member for runtimehandler?
 			}); err != nil {
 				return err
@@ -367,7 +385,7 @@ func (c *CRIImageService) getLabels(ctx context.Context, name string) map[string
 // updateImage updates image store to reflect the newest state of an image reference
 // in containerd. If the reference is not managed by the cri plugin, the function also
 // generates necessary metadata for the image and make it managed.
-func (c *CRIImageService) UpdateImage(ctx context.Context, r string /*, runtimeHandler string */) error {
+func (c *CRIImageService) UpdateImage(ctx context.Context, r string, platformForImagePull string) error {
 	// TODO: Use image service
 	img, err := c.client.GetImage(ctx, r)
 	if err != nil && !errdefs.IsNotFound(err) {
@@ -382,14 +400,14 @@ func (c *CRIImageService) UpdateImage(ctx context.Context, r string /*, runtimeH
 		}
 		id := configDesc.Digest.String()
 		labels := c.getLabels(ctx, id)
-		if err := c.createImageReference(ctx, id, img.Target(), labels); err != nil {
+		if err := c.createImageReference(ctx, id, platformForImagePull, img.Target(), labels); err != nil {
 			return fmt.Errorf("create image id reference %q: %w", id, err)
 		}
 		if err := c.imageStore.Update(ctx, id); err != nil {
 			return fmt.Errorf("update image store for %q: %w", id, err)
 		}
 		// The image id is ready, add the label to mark the image as managed.
-		if err := c.createImageReference(ctx, r, img.Target(), labels); err != nil {
+		if err := c.createImageReference(ctx, r, platformForImagePull, img.Target(), labels); err != nil {
 			return fmt.Errorf("create managed label: %w", err)
 		}
 	}
@@ -791,4 +809,14 @@ func (c *CRIImageService) snapshotterFromPodSandboxConfig(ctx context.Context, i
 	}
 
 	return snapshotter, nil
+}
+
+func (c *CRIImageService) runtimeHandlerFromPodSandboxConfig(ctx context.Context, imageRef string,
+	s *runtime.PodSandboxConfig) (string, error) {
+	runtimeHandler, ok := s.Annotations[annotations.RuntimeHandler]
+	if !ok {
+		return defaults.DefaultRuntimeName, nil
+	}
+
+	return runtimeHandler, nil
 }

@@ -18,11 +18,13 @@ package client
 
 import (
 	"context"
+	"strings"
 
 	imagesapi "github.com/containerd/containerd/v2/api/services/images/v1"
 	"github.com/containerd/containerd/v2/core/images"
 	"github.com/containerd/containerd/v2/pkg/epoch"
 	"github.com/containerd/containerd/v2/pkg/errdefs"
+	ctrdLabels "github.com/containerd/containerd/v2/pkg/labels"
 	"github.com/containerd/containerd/v2/pkg/oci"
 	"github.com/containerd/containerd/v2/protobuf"
 	ptypes "github.com/containerd/containerd/v2/protobuf/types"
@@ -63,8 +65,15 @@ func (s *remoteImages) List(ctx context.Context, filters ...string) ([]images.Im
 }
 
 func (s *remoteImages) Create(ctx context.Context, image images.Image) (images.Image, error) {
+	platformForImagePull := ""
+	for key := range image.Labels {
+		if strings.HasPrefix(key, ctrdLabels.PullImagePlatformLabelPrefix) {
+			platformForImagePull = strings.TrimPrefix(key, ctrdLabels.PullImagePlatformLabelPrefix+".")
+		}
+	}
 	req := &imagesapi.CreateImageRequest{
-		Image: imageToProto(&image),
+		Image:    imageToProto(&image),
+		Platform: platformForImagePull,
 	}
 	if tm := epoch.FromContext(ctx); tm != nil {
 		req.SourceDateEpoch = timestamppb.New(*tm)
@@ -78,6 +87,13 @@ func (s *remoteImages) Create(ctx context.Context, image images.Image) (images.I
 }
 
 func (s *remoteImages) Update(ctx context.Context, image images.Image, fieldpaths ...string) (images.Image, error) {
+	platformForImagePull := ""
+	for key := range image.Labels {
+		if strings.HasPrefix(key, ctrdLabels.PullImagePlatformLabelPrefix) {
+			platformForImagePull = strings.TrimPrefix(key, ctrdLabels.PullImagePlatformLabelPrefix+".")
+		}
+	}
+
 	var updateMask *ptypes.FieldMask
 	if len(fieldpaths) > 0 {
 		updateMask = &ptypes.FieldMask{
@@ -87,6 +103,7 @@ func (s *remoteImages) Update(ctx context.Context, image images.Image, fieldpath
 	req := &imagesapi.UpdateImageRequest{
 		Image:      imageToProto(&image),
 		UpdateMask: updateMask,
+		Platform:   platformForImagePull,
 	}
 	if tm := epoch.FromContext(ctx); tm != nil {
 		req.SourceDateEpoch = timestamppb.New(*tm)
@@ -99,6 +116,7 @@ func (s *remoteImages) Update(ctx context.Context, image images.Image, fieldpath
 	return imageFromProto(updated.Image), nil
 }
 
+// TODO(kiashok) : to modify
 func (s *remoteImages) Delete(ctx context.Context, name string, opts ...images.DeleteOpt) error {
 	var do images.DeleteOptions
 	for _, opt := range opts {
