@@ -137,6 +137,96 @@ type platformManifest struct {
 	m *ocispec.Manifest
 }
 
+func GetListOfMatchingDescriptors(ctx context.Context, provider content.Provider, image ocispec.Descriptor, platform platforms.MatchComparer) ([]ocispec.Descriptor, error) {
+	var (
+		limit = 1
+		m     []platformManifest
+		//wasIndex bool
+	)
+	if IsManifestType(image.MediaType) {
+		p, err := content.ReadBlob(ctx, provider, image)
+		if err != nil {
+			return nil, err
+		}
+
+		if err := validateMediaType(p, image.MediaType); err != nil {
+			return nil, fmt.Errorf("manifest: invalid desc %s: %w", image.Digest, err)
+		}
+
+		var manifest ocispec.Manifest
+		if err := json.Unmarshal(p, &manifest); err != nil {
+			return nil, err
+		}
+
+		if image.Digest != image.Digest && platform != nil {
+			if image.Platform != nil && !platform.Match(*image.Platform) {
+				return nil, nil
+			}
+
+			if image.Platform == nil {
+				imagePlatform, err := ConfigPlatform(ctx, provider, manifest.Config)
+				if err != nil {
+					return nil, err
+				}
+				if !platform.Match(imagePlatform) {
+					return nil, nil
+				}
+
+			}
+		}
+
+		m = append(m, platformManifest{
+			p: image.Platform,
+			m: &manifest,
+		})
+
+		return nil, nil
+	} else if IsIndexType(image.MediaType) {
+		p, err := content.ReadBlob(ctx, provider, image)
+		if err != nil {
+			return nil, err
+		}
+
+		if err := validateMediaType(p, image.MediaType); err != nil {
+			return nil, fmt.Errorf("manifest: invalid desc %s: %w", image.Digest, err)
+		}
+
+		var idx ocispec.Index
+		if err := json.Unmarshal(p, &idx); err != nil {
+			return nil, err
+		}
+
+		if platform == nil {
+			return idx.Manifests, nil
+		}
+
+		var descs []ocispec.Descriptor
+		for _, d := range idx.Manifests {
+			if d.Platform == nil || platform.Match(*d.Platform) {
+				descs = append(descs, d)
+			}
+		}
+
+		sort.SliceStable(descs, func(i, j int) bool {
+			if descs[i].Platform == nil {
+				return false
+			}
+			if descs[j].Platform == nil {
+				return true
+			}
+			return platform.Less(*descs[i].Platform, *descs[j].Platform)
+		})
+
+		//wasIndex = true
+
+		if len(descs) > limit {
+			return descs[:limit], nil
+		}
+		return descs, nil
+	}
+	return nil, fmt.Errorf("unexpected media type %v for %v: %w", image.MediaType, image.Digest, errdefs.ErrNotFound)
+}
+
 // Manifest resolves a manifest from the image for the given platform.
 //
 // When a manifest descriptor inside of a manifest index does not have

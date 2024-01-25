@@ -55,6 +55,7 @@ import (
 	"github.com/containerd/containerd/v2/pkg/dialer"
 	"github.com/containerd/containerd/v2/pkg/errdefs"
 	"github.com/containerd/containerd/v2/pkg/events"
+	ctrdLabels "github.com/containerd/containerd/v2/pkg/labels"
 	"github.com/containerd/containerd/v2/pkg/namespaces"
 	"github.com/containerd/containerd/v2/platforms"
 	"github.com/containerd/containerd/v2/plugins"
@@ -476,13 +477,35 @@ func (c *Client) Push(ctx context.Context, ref string, desc ocispec.Descriptor, 
 	return remotes.PushContent(ctx, pusher, desc, c.ContentStore(), limiter, pushCtx.PlatformMatcher, wrapper)
 }
 
+func getPlatformFromImage(img images.Image) []ocispec.Platform {
+	listOfImgPlatforms := []ocispec.Platform{platforms.DefaultSpec()}
+	for labelKey := range img.Labels {
+		if strings.HasPrefix(labelKey, ctrdLabels.PullImagePlatformLabelPrefix) {
+			listOfImgPlatforms = append(listOfImgPlatforms, platforms.MustParse(strings.TrimPrefix(labelKey, ctrdLabels.PullImagePlatformLabelPrefix+".")))
+		}
+	}
+	return listOfImgPlatforms
+}
+
 // GetImage returns an existing image
 func (c *Client) GetImage(ctx context.Context, ref string) (Image, error) {
 	i, err := c.ImageService().Get(ctx, ref)
 	if err != nil {
 		return nil, err
 	}
+	// platform := getPlatformFromImage(i)
+	// return NewImageWithPlatform(c, i, platforms.Only(platform)), nil
 	return NewImage(c, i), nil
+}
+
+func (c *Client) GetImageWithPlatform(ctx context.Context, ref string, platform ocispec.Platform) (Image, error) {
+	i, err := c.ImageService().Get(ctx, ref)
+	if err != nil {
+		return nil, err
+	}
+	// platform := getPlatformFromImage(i)
+	return NewImageWithPlatform(c, i, platforms.Only(platform)), nil
+	//return NewImage(c, i), nil
 }
 
 // ListImages returns all existing images
@@ -493,7 +516,13 @@ func (c *Client) ListImages(ctx context.Context, filters ...string) ([]Image, er
 	}
 	images := make([]Image, len(imgs))
 	for i, img := range imgs {
-		images[i] = NewImage(c, img)
+		listOfImgPlatforms := getPlatformFromImage(img)
+		if len(listOfImgPlatforms) > 0 { // could be image ID of the manifest list
+			continue
+		}
+		for _, platform := range listOfImgPlatforms {
+			images[i] = NewImageWithPlatform(c, img, platforms.Only(platform))
+		}
 	}
 	return images, nil
 }

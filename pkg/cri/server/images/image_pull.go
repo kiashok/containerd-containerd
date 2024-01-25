@@ -323,13 +323,15 @@ func ParseAuth(auth *runtime.AuthConfig, host string) (string, string, error) {
 // Note that because create and update are not finished in one transaction, there could be race. E.g.
 // the image reference is deleted by someone else after create returns already exists, but before update
 // happens.
-func (c *CRIImageService) createImageReference(ctx context.Context, name string, pullImageWithPlatform imagespec.Platform, desc imagespec.Descriptor, labels map[string]string) error {
+func (c *CRIImageService) createImageReference(ctx context.Context, name string, platform imagespec.Platform, desc imagespec.Descriptor, labels map[string]string) error {
 	img := containerdimages.Image{
 		Name:   name,
 		Target: desc,
 		// Add a label to indicate that the image is managed by the cri plugin.
 		Labels: labels,
 	}
+
+	pullImageWithPlatform := platforms.Format(platform)
 
 	// TODO(random-liu): Figure out which is the more performant sequence create then update or
 	// update then create.
@@ -354,7 +356,7 @@ func (c *CRIImageService) createImageReference(ctx context.Context, name string,
 	if oldImg.Target.Digest == img.Target.Digest && oldImg.Labels[crilabels.ImageLabelKey] == labels[crilabels.ImageLabelKey] {
 		return nil
 	}
-	platformLabel := fmt.Sprintf(ctrdLabels.PullImagePlatformLabelFormat, ctrdLabels.PullImagePlatformLabelPrefix, platforms.Format(pullImageWithPlatform))
+	platformLabel := fmt.Sprintf(ctrdLabels.PullImagePlatformLabelFormat, ctrdLabels.PullImagePlatformLabelPrefix, pullImageWithPlatform)
 	_, err = c.images.Update(ctx, img, "target", "labels."+crilabels.ImageLabelKey, "labels."+platformLabel)
 	if err == nil && c.publisher != nil {
 		if c.publisher != nil {
@@ -391,6 +393,9 @@ func (c *CRIImageService) UpdateImage(ctx context.Context, r string, platformFor
 	if err != nil && !errdefs.IsNotFound(err) {
 		return fmt.Errorf("get image by reference: %w", err)
 	}
+
+	platform := platforms.MustParse(platformForImagePull)
+
 	if err == nil && img.Labels()[crilabels.ImageLabelKey] != crilabels.ImageLabelValue {
 		// Make sure the image has the image id as its unique
 		// identifier that references the image in its lifetime.
@@ -400,14 +405,14 @@ func (c *CRIImageService) UpdateImage(ctx context.Context, r string, platformFor
 		}
 		id := configDesc.Digest.String()
 		labels := c.getLabels(ctx, id)
-		if err := c.createImageReference(ctx, id, platformForImagePull, img.Target(), labels); err != nil {
+		if err := c.createImageReference(ctx, id, platform, img.Target(), labels); err != nil {
 			return fmt.Errorf("create image id reference %q: %w", id, err)
 		}
 		if err := c.imageStore.Update(ctx, id); err != nil {
 			return fmt.Errorf("update image store for %q: %w", id, err)
 		}
 		// The image id is ready, add the label to mark the image as managed.
-		if err := c.createImageReference(ctx, r, platformForImagePull, img.Target(), labels); err != nil {
+		if err := c.createImageReference(ctx, r, platform, img.Target(), labels); err != nil {
 			return fmt.Errorf("create managed label: %w", err)
 		}
 	}

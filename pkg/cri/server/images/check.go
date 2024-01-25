@@ -22,7 +22,6 @@ import (
 	"sync"
 
 	"github.com/containerd/containerd/v2/core/images"
-	"github.com/containerd/containerd/v2/platforms"
 	"github.com/containerd/log"
 )
 
@@ -45,7 +44,7 @@ func (c *CRIImageService) CheckImages(ctx context.Context) error {
 		go func() {
 			defer wg.Done()
 			// TODO: Check platform/snapshot combination. Snapshot check should come first
-			ok, _, _, _, err := images.Check(ctx, i.ContentStore(), i.Target(), platforms.Default())
+			ok, _, _, _, err := images.Check(ctx, i.ContentStore(), i.Target(), i.Platform())
 			if err != nil {
 				log.G(ctx).WithError(err).Errorf("Failed to check image content readiness for %q", i.Name())
 				return
@@ -65,6 +64,9 @@ func (c *CRIImageService) CheckImages(ctx context.Context) error {
 				log.G(ctx).Warnf("The image %s is not unpacked.", i.Name())
 				// TODO(random-liu): Consider whether we should try unpack here.
 			}
+			// walk the manifest list or the manifest and get the platform corresponding to this platformMatcher i.Platform
+			listOfMatchingDescriptors := images.GetListOfMatchingDescriptors(ctx, i.ContentStore(), i.Target(), i.Platform()) // TODO:(kiashok) Walk thorugh the Check() function
+			// and see what it returns
 			if err := c.UpdateImage(ctx, i.Name()); err != nil {
 				log.G(ctx).WithError(err).Warnf("Failed to update reference for image %q", i.Name())
 				return
