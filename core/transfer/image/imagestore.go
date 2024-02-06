@@ -18,6 +18,7 @@ package image
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/containerd/typeurl/v2"
@@ -32,8 +33,11 @@ import (
 	"github.com/containerd/containerd/v2/core/streaming"
 	"github.com/containerd/containerd/v2/core/transfer"
 	"github.com/containerd/containerd/v2/core/transfer/plugins"
+	ctrdlabels "github.com/containerd/containerd/v2/pkg/labels"
 	"github.com/containerd/errdefs"
+	"github.com/containerd/log"
 	"github.com/containerd/platforms"
+	distribution "github.com/distribution/reference"
 )
 
 func init() {
@@ -212,8 +216,76 @@ func (is *Store) ImageFilter(h images.HandlerFunc, cs content.Store) images.Hand
 	return h
 }
 
-func (is *Store) Store(ctx context.Context, desc ocispec.Descriptor, store images.Store) ([]images.Image, error) {
+// checkUnpackAndAddPlatformLabel checks if the requested image has been successfully
+// unpacked for the requested platforms. If yes, platform image labels are added
+// to indicate what platforms the image has been pulled for. This becomes important
+// to support image pull per runtime class where an image could be pulled for different
+// platforms.
+// It also appends is.extraReferences with ImageID, repoDigest and repoTag as a bare minimum.
+// This maintains parity with what CRI is doing and also supports efficient look ups by image
+// digests.
+func (is *Store) checkUnpackAndAddPlatformLabel(ctx context.Context, desc ocispec.Descriptor, store images.Store, content content.Provider) error {
+	for _, platformSpec := range is.platforms {
+		platformMatcher := platforms.Only(platformSpec)
+
+		// Check if required layers were pulled and unpacked successfully.
+		manifest, err := images.Manifest(ctx, content, desc, platformMatcher)
+		if err != nil {
+			log.G(ctx).Infof("Image %v not unpacked for platform %v. Skip adding image label.", is.imageName, platformSpec)
+		}
+		imageLayers := []ocispec.Descriptor{}
+		for _, ociLayer := range manifest.Layers {
+			if images.IsLayerType(ociLayer.MediaType) {
+				imageLayers = append(imageLayers, ociLayer)
+			}
+		}
+
+		diffIDs, err := images.RootFS(ctx, content, manifest.Config)
+		if err != nil {
+			return fmt.Errorf("error while getting diffTDs for %v", is.imageName)
+		}
+		if len(diffIDs) != len(imageLayers) {
+			return errors.New("mismatched image rootfs and manifest layers")
+		}
+
+		// Add platform image label
+		platform := platforms.Format(platformSpec)
+		platformImageLabel := fmt.Sprintf(ctrdlabels.PlatformLabelFormat, ctrdlabels.PlatformLabelPrefix, platform)
+
+		if is.imageLabels == nil {
+			is.imageLabels = map[string]string{}
+		}
+		is.imageLabels[platformImageLabel] = platform
+
+		// Append is.extraReferences with ImageID, repoDigest and repoTag
+		imageID := manifest.Config.Digest.String()
+		namedRef, err := distribution.ParseDockerRef(is.imageName)
+		if err != nil {
+			return fmt.Errorf("failed to parse image reference %q: %w", is.imageName, err)
+		}
+		repoDigest, repoTag := images.GetRepoDigestAndTag(namedRef, desc.Digest, false /* isSchema1. Only v2 is suppported for transfer service */)
+
+		for _, r := range []string{imageID, repoTag, repoDigest} {
+			ref := Reference{
+				Name: r,
+			}
+			is.extraReferences = append(is.extraReferences, ref)
+		}
+	}
+	return nil
+}
+
+func (is *Store) Store(ctx context.Context, desc ocispec.Descriptor, store images.Store, content content.Provider) ([]images.Image, error) {
 	var imgs []images.Image
+
+	// Check if unpack was successful and set platform image label.
+	// Also append ImageID, repoDigest and repoTag to is.extraReferences
+	// to maintain parity with CRI and to have more efficient lookups
+	// by image digest.
+	err := is.checkUnpackAndAddPlatformLabel(ctx, desc, store, content)
+	if err != nil {
+		return nil, fmt.Errorf("failed to update containerd image store for %v", is.imageName)
+	}
 
 	// If import ref type, store references from annotation or prefix
 	if refSource, ok := desc.Annotations["io.containerd.import.ref-source"]; ok {
