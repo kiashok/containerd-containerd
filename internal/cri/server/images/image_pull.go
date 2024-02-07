@@ -174,9 +174,19 @@ func (c *CRIImageService) PullImage(ctx context.Context, name string, credential
 		return "", err
 	}
 
-	platformForImagePull, err := c.platformForImagePullFromPodSandboxConfig(ctx, ref, sandboxConfig)
-	if err != nil {
-		return "", errors.Wrapf(err, "failed to get platform information for pulling %v", ref)
+	// check if runtimehandler was passed from CRI if not get it from sandbox
+	var platformForImagePull imagespec.Platform
+	if runtimeHandler != "" {
+		if imagePlatform, ok := c.runtimePlatforms[runtimeHandler]; ok {
+			platformForImagePull = imagePlatform.Platform
+		} else {
+			return "", fmt.Errorf("invalid runtime handler %v", runtimeHandler)
+		}
+	} else {
+		platformForImagePull, err = c.platformForImagePullFromPodSandboxConfig(ctx, ref, sandboxConfig)
+		if err != nil {
+			return "", errors.Wrapf(err, "failed to get platform information for pulling %v", ref)
+		}
 	}
 
 	log.G(ctx).Debugf("PullImage %q with snapshotter %s", ref, snapshotter)
@@ -189,8 +199,9 @@ func (c *CRIImageService) PullImage(ctx context.Context, name string, credential
 	labels := c.getLabels(ctx, ref)
 
 	// Add label to indicate the platform the image is being pulled for.
-	platformImageLabel := fmt.Sprintf(ctrdlabels.PlatformLabelFormat, ctrdlabels.PlatformLabelPrefix, platforms.Format(platformForImagePull))
-	labels[platformImageLabel] = platformImageLabel
+	platform := platforms.Format(platformForImagePull)
+	platformImageLabelKey := fmt.Sprintf(ctrdlabels.PlatformLabelFormat, ctrdlabels.PlatformLabelPrefix, platform)
+	labels[platformImageLabelKey] = platform
 
 	pullOpts := []containerd.RemoteOpt{
 		containerd.WithSchema1Conversion, //nolint:staticcheck // Ignore SA1019. Need to keep deprecated package for compatibility.
@@ -239,14 +250,14 @@ func (c *CRIImageService) PullImage(ctx context.Context, name string, credential
 		if r == "" {
 			continue
 		}
-		if err := c.createImageReference(ctx, r, image.Target(), labels); err != nil {
+		if err := c.createImageReference(ctx, r, image.Target(), labels, platform); err != nil {
 			return "", fmt.Errorf("failed to create image reference %q: %w", r, err)
 		}
 		// Update image store to reflect the newest state in containerd.
 		// No need to use `updateImage`, because the image reference must
 		// have been managed by the cri plugin.
 		// TODO: Use image service directly
-		if err := c.imageStore.Update(ctx, r); err != nil {
+		if err := c.imageStore.Update(ctx, r, platform); err != nil {
 			return "", fmt.Errorf("failed to update image store %q: %w", r, err)
 		}
 	}
@@ -309,7 +320,7 @@ func ParseAuth(auth *runtime.AuthConfig, host string) (string, string, error) {
 // Note that because create and update are not finished in one transaction, there could be race. E.g.
 // the image reference is deleted by someone else after create returns already exists, but before update
 // happens.
-func (c *CRIImageService) createImageReference(ctx context.Context, name string, desc imagespec.Descriptor, labels map[string]string) error {
+func (c *CRIImageService) createImageReference(ctx context.Context, name string, desc imagespec.Descriptor, labels map[string]string, platform string) error {
 	img := containerdimages.Image{
 		Name:   name,
 		Target: desc,
@@ -339,6 +350,12 @@ func (c *CRIImageService) createImageReference(ctx context.Context, name string,
 		labels[crilabels.PinnedImageLabelKey] == crilabels.PinnedImageLabelValue {
 		fieldpaths = append(fieldpaths, "labels."+crilabels.PinnedImageLabelKey)
 	}
+	// Update image with new platform label to indicate what platform this image is being
+	platformLabelKey := fmt.Sprintf(ctrdlabels.PlatformLabelFormat, ctrdlabels.PlatformLabelPrefix, platform)
+	if oldImg.Labels[platformLabelKey] != labels[platformLabelKey] {
+		fieldpaths = append(fieldpaths, "labels."+platformLabelKey)
+	}
+
 	if oldImg.Target.Digest == img.Target.Digest && len(fieldpaths) < 2 {
 		return nil
 	}
@@ -357,38 +374,62 @@ func (c *CRIImageService) getLabels(ctx context.Context, name string) map[string
 	return labels
 }
 
+func (c *CRIImageService) getNewPlatformLabelForImage(ctx context.Context, img containerdimages.Image) platforms.Platform {
+	// parse image labels and check CRI image store to see if entry for this (image, platform)
+	// already exists
+	for key, _ := range img.Labels {
+		if strings.HasPrefix(key, ctrdlabels.PlatformLabelPrefix) {
+			platform := img.Labels[key]
+			// if (image, platform) does not exist for this image in
+			// CRI image store, it is new. So break and return this platform
+			if _, err := c.imageStore.Get(img.Name, platform); err != nil {
+				return platforms.MustParse(platform)
+			}
+		}
+	}
+
+	return platforms.DefaultSpec()
+}
+
 // updateImage updates image store to reflect the newest state of an image reference
 // in containerd. If the reference is not managed by the cri plugin, the function also
 // generates necessary metadata for the image and make it managed.
 func (c *CRIImageService) UpdateImage(ctx context.Context, r string) error {
 	// TODO: Use image service
-	img, err := c.client.GetImage(ctx, r)
+	// TODO(kiashok): find the new label by querying cri image store. Use helper function for this
+	img, err := c.images.Get(ctx, r)
 	if err != nil && !errdefs.IsNotFound(err) {
 		return fmt.Errorf("get image by reference: %w", err)
 	}
-	if err == nil && img.Labels()[crilabels.ImageLabelKey] != crilabels.ImageLabelValue {
+
+	// find new platform label that this image needs to be updated for
+	newPlatformSpecForImage := c.getNewPlatformLabelForImage(ctx, img)
+	platform := platforms.Format(newPlatformSpecForImage)
+
+	if err == nil && img.Labels[crilabels.ImageLabelKey] != crilabels.ImageLabelValue {
 		// Make sure the image has the image id as its unique
 		// identifier that references the image in its lifetime.
-		configDesc, err := img.Config(ctx)
+		configDesc, err := img.Config(ctx, c.content, platforms.Only(newPlatformSpecForImage))
 		if err != nil {
 			return fmt.Errorf("get image id: %w", err)
 		}
 		id := configDesc.Digest.String()
 		labels := c.getLabels(ctx, r)
-		if err := c.createImageReference(ctx, id, img.Target(), labels); err != nil {
+
+		if err := c.createImageReference(ctx, id, img.Target, labels, platform); err != nil {
 			return fmt.Errorf("create image id reference %q: %w", id, err)
 		}
-		if err := c.imageStore.Update(ctx, id); err != nil {
+		if err := c.imageStore.Update(ctx, id, platform); err != nil {
 			return fmt.Errorf("update image store for %q: %w", id, err)
 		}
 		// The image id is ready, add the label to mark the image as managed.
-		if err := c.createImageReference(ctx, r, img.Target(), labels); err != nil {
+		if err := c.createImageReference(ctx, r, img.Target, labels, platform); err != nil {
 			return fmt.Errorf("create managed label: %w", err)
 		}
 	}
 	// If the image is not found, we should continue updating the cache,
 	// so that the image can be removed from the cache.
-	if err := c.imageStore.Update(ctx, r); err != nil {
+	if err := c.imageStore.Update(ctx, r, platform); err != nil {
 		return fmt.Errorf("update image store for %q: %w", r, err)
 	}
 	return nil

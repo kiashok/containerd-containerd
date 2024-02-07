@@ -23,6 +23,7 @@ import (
 	"github.com/containerd/containerd/v2/core/images"
 	"github.com/containerd/containerd/v2/pkg/tracing"
 	"github.com/containerd/errdefs"
+	"github.com/containerd/platforms"
 
 	runtime "k8s.io/cri-api/pkg/apis/runtime/v1"
 )
@@ -34,17 +35,32 @@ import (
 // Remove the whole image no matter the it's image id or reference. This is the
 // semantic defined in CRI now.
 func (c *GRPCCRIImageService) RemoveImage(ctx context.Context, r *runtime.RemoveImageRequest) (*runtime.RemoveImageResponse, error) {
+	resp, err := c.CRIImageService.RemoveImage(ctx, r.GetImage())
+	if err != nil {
+		return nil, err
+	}
+	return resp, nil
+}
+
+func (c *CRIImageService) RemoveImage(ctx context.Context, imageSpec *runtime.ImageSpec) (*runtime.RemoveImageResponse, error) {
 	span := tracing.SpanFromContext(ctx)
 
-	// TODO: Move to separate function
-	image, err := c.LocalResolve(r.GetImage().GetImage())
+	runtimeHandler := imageSpec.GetRuntimeHandler()
+	platformSpec := platforms.DefaultSpec()
+	if runtimeHandler != "" {
+		if runtimePlatform, ok := c.runtimePlatforms[runtimeHandler]; ok {
+			platformSpec = runtimePlatform.Platform
+		}
+	}
+
+	image, err := c.LocalResolve(imageSpec.GetImage(), runtimeHandler)
 	if err != nil {
 		if errdefs.IsNotFound(err) {
 			span.AddEvent(err.Error())
 			// return empty without error when image not found.
 			return &runtime.RemoveImageResponse{}, nil
 		}
-		return nil, fmt.Errorf("can not resolve %q locally: %w", r.GetImage().GetImage(), err)
+		return nil, fmt.Errorf("can not resolve %q locally: %w", imageSpec.GetImage(), err)
 	}
 	span.SetAttributes(tracing.Attribute("image.id", image.ID))
 	// Remove all image references.
@@ -59,7 +75,7 @@ func (c *GRPCCRIImageService) RemoveImage(ctx context.Context, r *runtime.Remove
 		err = c.images.Delete(ctx, ref, opts...)
 		if err == nil || errdefs.IsNotFound(err) {
 			// Update image store to reflect the newest state in containerd.
-			if err := c.imageStore.Update(ctx, ref); err != nil {
+			if err := c.imageStore.Update(ctx, ref, platforms.Format(platformSpec)); err != nil {
 				return nil, fmt.Errorf("failed to update image reference %q for %q: %w", ref, image.ID, err)
 			}
 			continue

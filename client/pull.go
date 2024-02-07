@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"golang.org/x/sync/semaphore"
@@ -29,6 +30,7 @@ import (
 	"github.com/containerd/containerd/v2/core/remotes/docker"
 	"github.com/containerd/containerd/v2/core/remotes/docker/schema1" //nolint:staticcheck // Ignore SA1019. Need to keep deprecated package for compatibility.
 	"github.com/containerd/containerd/v2/core/unpack"
+	ctrdlabels "github.com/containerd/containerd/v2/pkg/labels"
 	"github.com/containerd/containerd/v2/pkg/tracing"
 	"github.com/containerd/errdefs"
 	"github.com/containerd/platforms"
@@ -298,7 +300,25 @@ func (c *Client) createNewImage(ctx context.Context, img images.Image) (images.I
 				return images.Image{}, err
 			}
 
-			updated, err := is.Update(ctx, img)
+			// if the image already exists, we want to ensure that we do not replace
+			// any exisitng platform image labels. Combine the old and new labels
+			// before update
+			// if the image already exists, copy all the existing runtimeHandler labels from
+			// the old image before calling update
+			oldImg, err := is.Get(ctx, img.Name)
+			if err != nil {
+				continue
+			}
+
+			var fieldpaths []string
+			// Find the new platform image label added to the image in img.Label and
+			// ensure that we just update that label.
+			for key, value := range img.Labels {
+				if strings.HasPrefix(key, ctrdlabels.PlatformLabelPrefix) && oldImg.Labels[key] != value {
+					fieldpaths = append(fieldpaths, "labels."+key)
+				}
+			}
+			updated, err := is.Update(ctx, img, fieldpaths...)
 			if err != nil {
 				// if image was removed, try create again
 				if errdefs.IsNotFound(err) {
