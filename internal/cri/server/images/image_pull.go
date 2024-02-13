@@ -111,14 +111,14 @@ func (c *GRPCCRIImageService) PullImage(ctx context.Context, r *runtime.PullImag
 		return ParseAuth(hostauth, host)
 	}
 
-	ref, err := c.CRIImageService.PullImage(ctx, imageRef, credentials, r.SandboxConfig)
+	ref, err := c.CRIImageService.PullImage(ctx, imageRef, credentials, r.SandboxConfig, r.GetImage().GetRuntimeHandler())
 	if err != nil {
 		return nil, err
 	}
 	return &runtime.PullImageResponse{ImageRef: ref}, nil
 }
 
-func (c *CRIImageService) PullImage(ctx context.Context, name string, credentials func(string) (string, string, error), sandboxConfig *runtime.PodSandboxConfig) (_ string, err error) {
+func (c *CRIImageService) PullImage(ctx context.Context, name string, credentials func(string) (string, string, error), sandboxConfig *runtime.PodSandboxConfig, runtimeHandler string) (_ string, err error) {
 
 	span := tracing.SpanFromContext(ctx)
 	defer func() {
