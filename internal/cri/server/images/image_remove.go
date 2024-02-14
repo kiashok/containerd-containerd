@@ -25,7 +25,6 @@ import (
 	"github.com/containerd/containerd/v2/pkg/tracing"
 	"github.com/containerd/errdefs"
 	"github.com/containerd/platforms"
-	"github.com/pkg/errors"
 
 	ctrdlabels "github.com/containerd/containerd/v2/pkg/labels"
 	runtime "k8s.io/cri-api/pkg/apis/runtime/v1"
@@ -83,20 +82,18 @@ func (c *CRIImageService) RemoveImage(ctx context.Context, imageSpec *runtime.Im
 	// Remove all image references.
 	for _, ref := range image.References {
 		var opts []images.DeleteOpt
-		var updatedImg images.Image
 
 		// remove only the platform label from the containerd image as the image
 		// could exist for many platforms with the image pull per runtime class feature
 		ctrdImg, err := c.images.Get(ctx, ref)
-		if err == nil {
-			platformLabelKey := fmt.Sprintf(ctrdlabels.PlatformLabelFormat, ctrdlabels.PlatformLabelPrefix, platform)
-			if _, ok := ctrdImg.Labels[platformLabelKey]; ok {
-				delete(ctrdImg.Labels, platformLabelKey)
-				updatedImg, err = c.images.Update(ctx, ctrdImg, "labels")
-				if err != nil {
-					return nil, errors.Wrapf(err, "failed to update imageRef %v after label delete", ref)
-				}
-			}
+		if err != nil {
+			continue
+		}
+
+		// delete platform image label from ctrdImg
+		updatedImg, err := c.deletePlatformLabelAndUpdateImage(ctx, ctrdImg, platform)
+		if err != nil {
+			return nil, err
 		}
 
 		// delete ref from CRI image store
