@@ -31,7 +31,9 @@ type NetNS struct {
 
 // NewNetNS creates a network namespace for the sandbox.
 func NewNetNS(baseDir string) (*NetNS, error) {
-	temp := hcn.HostComputeNamespace{}
+//	temp := hcn.HostComputeNamespace{}
+	// temp := hcn.HostComputeNamespace{}
+	temp := hcn.NewNamespace(hcn.NamespaceTypeHost)
 	hcnNamespace, err := temp.Create()
 	if err != nil {
 		return nil, err
