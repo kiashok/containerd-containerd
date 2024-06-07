@@ -931,6 +931,10 @@ func (c *criService) buildWindowsSpec(
 		annotations.DefaultCRIAnnotations(sandboxID, containerName, imageName, sandboxConfig, false)...,
 	)
 
+	if config.Windows.Resources.AffinityCpus != nil {
+		specOpts = append(specOpts, oci.WithAffinityCPUs(config.Windows.Resources.AffinityCpus))
+	}
+
 	return specOpts, nil
 }
 
