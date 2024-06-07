@@ -19,10 +19,12 @@ package oci
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 
-	"github.com/opencontainers/runtime-spec/specs-go"
+	specs "github.com/opencontainers/runtime-spec/specs-go"
 	"golang.org/x/sys/windows"
+	runtime "k8s.io/cri-api/pkg/apis/runtime/v1"
 
 	"github.com/containerd/containerd/v2/core/containers"
 )
@@ -41,6 +43,30 @@ func WithProcessCommandLine(cmdLine string) SpecOpts {
 		setProcess(s)
 		s.Process.Args = nil
 		s.Process.CommandLine = cmdLine
+		return nil
+	}
+}
+
+func WithAffinityCPUs(affinityCPUs []*runtime.WindowsCpuGroupAffinity) SpecOpts {
+	return func(_ context.Context, _ Client, c *containers.Container, s *Spec) error {
+		if affinityCPUs == nil {
+			return nil
+		}
+		// We would expect the Windows and Resources struct to be setup by now
+		if s.Windows == nil || s.Windows.Resources == nil {
+			return nil
+		}
+		if s.Windows.Resources.CPU == nil {
+			s.Windows.Resources.CPU = &specs.WindowsCPUResources{}
+		}
+		if s.Windows.Resources.CPU.AffinityCPUs == nil {
+			s.Windows.Resources.CPU.AffinityCPUs = make([]specs.WindowsCPUGroupAffinity, len(affinityCPUs))
+		}
+		for i, cpu := range affinityCPUs {
+			fmt.Printf("!! cpu i %v, value %v", i, cpu)
+			s.Windows.Resources.CPU.AffinityCPUs[i].CPUMask = cpu.CpuMask
+			s.Windows.Resources.CPU.AffinityCPUs[i].CPUGroup = cpu.CpuGroup
+		}
 		return nil
 	}
 }
