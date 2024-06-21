@@ -148,4 +148,8 @@ require (
 	tags.cncf.io/container-device-interface/specs-go v0.7.0 // indirect
 )
 
-replace github.com/containerd/containerd/api => ./api
+replace (
+	github.com/containerd/containerd/api => ./api
+	github.com/opencontainers/runtime-spec => ../../runtime-spec/
+	k8s.io/cri-api => ../../../k8s.io/kubernetes/staging/src/k8s.io/cri-api/
+)
