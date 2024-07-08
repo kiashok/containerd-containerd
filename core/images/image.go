@@ -20,7 +20,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/containerd/containerd/v2/core/content"
@@ -108,6 +110,11 @@ func (image *Image) Config(ctx context.Context, provider content.Provider, platf
 	return Config(ctx, provider, image.Target, platform)
 }
 
+/*
+func () {
+
+}
+*/
 // RootFS returns the unpacked diffids that make up and images rootfs.
 //
 // These are used to verify that a set of layers unpacked to the expected
@@ -137,6 +144,97 @@ type platformManifest struct {
 	m *ocispec.Manifest
 }
 
+func getInfoFromManifest(ctx context.Context, cs content.Store, target ocispec.Descriptor) (configDigest digest.Digest, platform ocispec.Platform, snapshot string, snapshotID string, err error) {
+	snapshot = ""
+	snapshotID = ""
+	if IsManifestType(target.MediaType) {
+		// Read the manifest list blob
+		p, err := validateAndReadBlob(ctx, cs, target)
+		if err != nil {
+			return "", ocispec.Platform{}, "", "", err
+		}
+
+		var manifest ocispec.Manifest
+		if err := json.Unmarshal(p, &manifest); err != nil {
+			return "", ocispec.Platform{}, "", "", fmt.Errorf("failed to unmarshal manifest: %v", err)
+		}
+
+		// read config and
+
+		configDigest := manifest.Config.Digest
+		contentInfo, err := cs.Info(ctx, configDigest)
+		if err != nil {
+			return "", ocispec.Platform{}, "", "", errdefs.ErrNotFound
+		}
+		labels := contentInfo.Labels
+		for key := range labels {
+			if strings.HasPrefix(key, "containerd.io/gc.ref.snapshot.") {
+				// this gc has to be removed, new entry should be inserted into containerd image store
+				// and its labels should be updated.
+				//				return configDesc, *target.Platform, strings.TrimPrefix(key, "containerd.io/gc.ref.snapshot."), value, nil
+				snapshot = strings.TrimPrefix(key, "containerd.io/gc.ref.snapshot.")
+				snapshotID = labels[key]
+				platform = *target.Platform
+				break
+			}
+		}
+		if snapshot != "" {
+			return configDigest, *target.Platform, snapshot, snapshotID, nil
+		}
+	}
+	return configDigest, platform, snapshot, snapshotID, nil
+}
+
+// configDesc, platform, snapshot, snapshotID, err
+func FindPlatformAndRuntimeHandlerToUpdate(ctx context.Context, cs content.Store, target ocispec.Descriptor) (digest.Digest, ocispec.Platform, string, string, error) {
+	if IsIndexType(target.MediaType) {
+		// read the manifest list blob
+		p, err := validateAndReadBlob(ctx, cs, target)
+		if err != nil {
+			return "", ocispec.Platform{}, "", "", err
+		}
+
+		var idx ocispec.Index
+		if err := json.Unmarshal(p, &idx); err != nil {
+			return "", ocispec.Platform{}, "", "", err
+		}
+
+		for _, manifestDesc := range idx.Manifests {
+			manifestPlatform := manifestDesc.Platform
+			if manifestPlatform == nil {
+				// return idx.Manifests, nil
+				// just skip?? so you can use the default platform handler is nothing?
+				continue
+			}
+			// get the config
+			//config := manifest.Config
+			var err error
+			configDigest, platform, snapshot, snapshotID, err := getInfoFromManifest(ctx, cs, manifestDesc)
+			log.G(ctx).Debugf("!! snapshot %v, snoashotID %v", snapshot, snapshotID)
+			if err != nil {
+				continue
+			}
+			if reflect.DeepEqual(platform, ocispec.Platform{}) { // basicaly check if platform is empty
+				platform = *manifestPlatform
+			}
+			return configDigest, platform, snapshot, snapshotID, nil /// should you see if anything else needs to be updated or just first hit?
+		}
+	}
+	return "", ocispec.Platform{}, "", "", nil
+}
+
+func validateAndReadBlob(ctx context.Context, provider content.Provider, desc ocispec.Descriptor) ([]byte, error) {
+	p, err := content.ReadBlob(ctx, provider, desc)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := validateMediaType(p, desc.MediaType); err != nil {
+		return nil, fmt.Errorf("manifest: invalid desc %s: %w", desc.Digest, err)
+	}
+	return p, nil
+}
+
 // Manifest resolves a manifest from the image for the given platform.
 //
 // When a manifest descriptor inside of a manifest index does not have
@@ -159,13 +257,9 @@ func Manifest(ctx context.Context, provider content.Provider, image ocispec.Desc
 
 	if err := Walk(ctx, HandlerFunc(func(ctx context.Context, desc ocispec.Descriptor) ([]ocispec.Descriptor, error) {
 		if IsManifestType(desc.MediaType) {
-			p, err := content.ReadBlob(ctx, provider, desc)
+			p, err := validateAndReadBlob(ctx, provider, desc)
 			if err != nil {
 				return nil, err
-			}
-
-			if err := validateMediaType(p, desc.MediaType); err != nil {
-				return nil, fmt.Errorf("manifest: invalid desc %s: %w", desc.Digest, err)
 			}
 
 			var manifest ocispec.Manifest
@@ -197,13 +291,9 @@ func Manifest(ctx context.Context, provider content.Provider, image ocispec.Desc
 
 			return nil, nil
 		} else if IsIndexType(desc.MediaType) {
-			p, err := content.ReadBlob(ctx, provider, desc)
+			p, err := validateAndReadBlob(ctx, provider, desc)
 			if err != nil {
 				return nil, err
-			}
-
-			if err := validateMediaType(p, desc.MediaType); err != nil {
-				return nil, fmt.Errorf("manifest: invalid desc %s: %w", desc.Digest, err)
 			}
 
 			var idx ocispec.Index
