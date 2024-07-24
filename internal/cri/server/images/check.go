@@ -68,10 +68,12 @@ func (c *CRIImageService) CheckImages(ctx context.Context) error {
 			platformForRuntimeHandler := platforms.MustParse(c.config.RuntimePlatforms[runtimeHandler].Platform)
 			ok, _, _, _, err := images.Check(ctx, c.content, i.Target, platforms.Only(platformForRuntimeHandler))
 			if err != nil {
+				// TODO: Should we delete this image from containerd store?
 				log.G(ctx).WithError(err).Errorf("Failed to check image content readiness for %q", ref)
 				return
 			}
 			if !ok {
+				// TODO: Should we delete this image from containerd store?
 				log.G(ctx).Warnf("The image content readiness for %q is not ok", ref)
 				return
 			}
