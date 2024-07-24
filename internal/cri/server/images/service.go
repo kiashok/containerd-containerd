@@ -24,6 +24,7 @@ import (
 	"github.com/containerd/containerd/v2/core/content"
 	"github.com/containerd/containerd/v2/core/images"
 	"github.com/containerd/containerd/v2/core/snapshots"
+	"github.com/containerd/containerd/v2/defaults"
 	criconfig "github.com/containerd/containerd/v2/internal/cri/config"
 	imagestore "github.com/containerd/containerd/v2/internal/cri/store/image"
 	snapshotstore "github.com/containerd/containerd/v2/internal/cri/store/snapshot"
@@ -54,6 +55,8 @@ type CRIImageService struct {
 	// images is the lower level image store used for raw storage,
 	// no event publishing should currently be assumed
 	images images.Store
+	// contentStore stores content information
+	content content.Store
 	// client is a subset of the containerd client
 	// and will be replaced by image store and transfer service
 	client imageClient
@@ -100,11 +103,16 @@ type CRIImageServiceOptions struct {
 //     - Content store (from metadata)
 //  3. Separate image cache and snapshot cache to first class plugins, make the snapshot cache much more efficient and intelligent
 func NewService(config criconfig.ImageConfig, options *CRIImageServiceOptions) (*CRIImageService, error) {
+	platformList := map[string]imagespec.Platform{}
+	for key, value := range config.RuntimePlatforms {
+		platformList[key], _ = platforms.Parse(value.Platform)
+	}
 	svc := CRIImageService{
 		config:                      config,
 		images:                      options.Images,
+		content:                     options.Content,
 		client:                      options.Client,
-		imageStore:                  imagestore.NewStore(options.Images, options.Content, platforms.Default()),
+		imageStore:                  imagestore.NewStore(options.Images, options.Content, platformList),
 		imageFSPaths:                options.ImageFSPaths,
 		runtimePlatforms:            options.RuntimePlatforms,
 		snapshotStore:               snapshotstore.NewStore(),
@@ -124,7 +132,10 @@ func NewService(config criconfig.ImageConfig, options *CRIImageServiceOptions) (
 
 // LocalResolve resolves image reference locally and returns corresponding image metadata. It
 // returns errdefs.ErrNotFound if the reference doesn't exist.
-func (c *CRIImageService) LocalResolve(refOrID string) (imagestore.Image, error) {
+func (c *CRIImageService) LocalResolve(refOrID string, runtimeHandler string) (imagestore.Image, error) {
+	if runtimeHandler == "" {
+		runtimeHandler = defaults.DefaultRuntimeHandler
+	}
 	getImageID := func(refOrId string) string {
 		if _, err := imagedigest.Parse(refOrID); err == nil {
 			return refOrID
@@ -136,7 +147,7 @@ func (c *CRIImageService) LocalResolve(refOrID string) (imagestore.Image, error)
 			if err != nil {
 				return ""
 			}
-			id, err := c.imageStore.Resolve(normalized.String())
+			id, err := c.imageStore.Resolve(normalized.String(), runtimeHandler)
 			if err != nil {
 				return ""
 			}
@@ -149,7 +160,7 @@ func (c *CRIImageService) LocalResolve(refOrID string) (imagestore.Image, error)
 		// Try to treat ref as imageID
 		imageID = refOrID
 	}
-	return c.imageStore.Get(imageID)
+	return c.imageStore.Get(imageID, runtimeHandler)
 }
 
 // RuntimeSnapshotter overrides the default snapshotter if Snapshotter is set for this runtime.
@@ -165,8 +176,12 @@ func (c *CRIImageService) RuntimeSnapshotter(ctx context.Context, ociRuntime cri
 }
 
 // GetImage gets image metadata by image id.
-func (c *CRIImageService) GetImage(id string) (imagestore.Image, error) {
-	return c.imageStore.Get(id)
+func (c *CRIImageService) GetImage(id string, runtimeHandler string) (imagestore.Image, error) {
+	// get platform that this image is wanted for
+	if runtimeHandler == "" {
+		runtimeHandler = defaults.DefaultRuntimeHandler
+	}
+	return c.imageStore.Get(id, runtimeHandler)
 }
 
 // GetSnapshot returns the snapshot with specified key.

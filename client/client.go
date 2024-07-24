@@ -484,7 +484,7 @@ func (c *Client) GetImage(ctx context.Context, ref string) (Image, error) {
 	if err != nil {
 		return nil, err
 	}
-	return NewImage(c, i), nil
+	return NewImage(c, i), nil // TODO: change!
 }
 
 // ListImages returns all existing images

@@ -21,6 +21,7 @@ import (
 	"fmt"
 
 	"github.com/containerd/containerd/v2/core/images"
+	"github.com/containerd/containerd/v2/defaults"
 	"github.com/containerd/containerd/v2/pkg/tracing"
 	"github.com/containerd/errdefs"
 
@@ -44,7 +45,11 @@ func (c *GRPCCRIImageService) RemoveImage(ctx context.Context, r *runtime.Remove
 func (c *CRIImageService) RemoveImage(ctx context.Context, imageSpec *runtime.ImageSpec) error {
 	span := tracing.SpanFromContext(ctx)
 
-	image, err := c.LocalResolve(imageSpec.GetImage())
+	runtimeHandler := defaults.DefaultRuntimeHandler
+	if imageSpec.GetRuntimeHandler() != "" {
+		runtimeHandler = imageSpec.GetRuntimeHandler()
+	}
+	image, err := c.LocalResolve(imageSpec.GetImage(), runtimeHandler)
 	if err != nil {
 		if errdefs.IsNotFound(err) {
 			span.AddEvent(err.Error())
@@ -53,7 +58,7 @@ func (c *CRIImageService) RemoveImage(ctx context.Context, imageSpec *runtime.Im
 		}
 		return fmt.Errorf("can not resolve %q locally: %w", imageSpec.GetImage(), err)
 	}
-	span.SetAttributes(tracing.Attribute("image.id", image.ID))
+	span.SetAttributes(tracing.Attribute("image.id", image.Key.ID))
 	// Remove all image references.
 	for i, ref := range image.References {
 		var opts []images.DeleteOpt
@@ -66,12 +71,12 @@ func (c *CRIImageService) RemoveImage(ctx context.Context, imageSpec *runtime.Im
 		err = c.images.Delete(ctx, ref, opts...)
 		if err == nil || errdefs.IsNotFound(err) {
 			// Update image store to reflect the newest state in containerd.
-			if err := c.imageStore.Update(ctx, ref); err != nil {
-				return fmt.Errorf("failed to update image reference %q for %q: %w", ref, image.ID, err)
+			if err := c.imageStore.Update(ctx, ref, runtimeHandler); err != nil {
+				return fmt.Errorf("failed to update image reference %q for %q: %w", ref, image.Key.ID, err)
 			}
 			continue
 		}
-		return fmt.Errorf("failed to delete image reference %q for %q: %w", ref, image.ID, err)
+		return fmt.Errorf("failed to delete image reference %q for %q: %w", ref, image.Key.ID, err)
 	}
 	return nil
 }

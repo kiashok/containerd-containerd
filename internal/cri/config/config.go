@@ -268,7 +268,6 @@ type ImagePlatform struct {
 type ImageConfig struct {
 	// Snapshotter is the snapshotter used by containerd.
 	Snapshotter string `toml:"snapshotter" json:"snapshotter"`
-
 	// DisableSnapshotAnnotations disables to pass additional annotations (image
 	// related information) to snapshotters. These annotations are required by
 	// stargz snapshotter (https://github.com/containerd/stargz-snapshotter).

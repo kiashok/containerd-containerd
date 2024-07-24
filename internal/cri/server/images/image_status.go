@@ -23,6 +23,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/containerd/containerd/v2/defaults"
 	imagestore "github.com/containerd/containerd/v2/internal/cri/store/image"
 	"github.com/containerd/containerd/v2/internal/cri/util"
 	"github.com/containerd/containerd/v2/pkg/tracing"
@@ -38,7 +39,11 @@ import (
 // kubernetes/kubernetes#46255)
 func (c *CRIImageService) ImageStatus(ctx context.Context, r *runtime.ImageStatusRequest) (*runtime.ImageStatusResponse, error) {
 	span := tracing.SpanFromContext(ctx)
-	image, err := c.LocalResolve(r.GetImage().GetImage())
+	runtimeHandler := r.Image.GetRuntimeHandler()
+	if runtimeHandler == "" {
+		runtimeHandler = defaults.DefaultRuntimeHandler
+	}
+	image, err := c.LocalResolve(r.GetImage().GetImage(), runtimeHandler)
 	if err != nil {
 		if errdefs.IsNotFound(err) {
 			span.AddEvent(err.Error())
@@ -47,7 +52,7 @@ func (c *CRIImageService) ImageStatus(ctx context.Context, r *runtime.ImageStatu
 		}
 		return nil, fmt.Errorf("can not resolve %q locally: %w", r.GetImage().GetImage(), err)
 	}
-	span.SetAttributes(tracing.Attribute("image.id", image.ID))
+	span.SetAttributes(tracing.Attribute("image.id", image.Key.ID))
 	// TODO(random-liu): [P0] Make sure corresponding snapshot exists. What if snapshot
 	// doesn't exist?
 
@@ -67,7 +72,7 @@ func (c *CRIImageService) ImageStatus(ctx context.Context, r *runtime.ImageStatu
 func toCRIImage(image imagestore.Image) *runtime.Image {
 	repoTags, repoDigests := util.ParseImageReferences(image.References)
 	runtimeImage := &runtime.Image{
-		Id:          image.ID,
+		Id:          image.Key.ID,
 		RepoTags:    repoTags,
 		RepoDigests: repoDigests,
 		Size_:       uint64(image.Size),

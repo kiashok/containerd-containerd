@@ -19,16 +19,22 @@ package image
 import (
 	"fmt"
 
+	"github.com/containerd/containerd/v2/defaults"
 	"github.com/containerd/platforms"
+	imagespec "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
 // NewFakeStore returns an image store with predefined images.
 // Update is not allowed for this fake store.
 func NewFakeStore(images []Image) (*Store, error) {
-	s := NewStore(nil, nil, platforms.Default())
+	platformList := map[string]imagespec.Platform{}
+	platformList[defaults.DefaultRuntimeHandler] = platforms.DefaultSpec()
+	s := NewStore(nil, nil, platformList)
 	for _, i := range images {
 		for _, ref := range i.References {
-			s.refCache[ref] = i.ID
+			refKey := RefKey{Ref: ref, RuntimeHandler: defaults.DefaultRuntimeHandler}
+			imageIDKey := ImageIDKey{ID: i.Key.ID, RuntimeHandler: defaults.DefaultRuntimeHandler}
+			s.refCache[refKey] = imageIDKey
 		}
 		if err := s.store.add(i); err != nil {
 			return nil, fmt.Errorf("add image %+v: %w", i, err)

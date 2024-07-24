@@ -42,5 +42,6 @@ const (
 	// to store FIFOs. Unused on Windows.
 	DefaultFIFODir = ""
 	// DefaultRuntime is the default windows runtime
-	DefaultRuntime = "io.containerd.runhcs.v1"
+	DefaultRuntime        = "io.containerd.runhcs.v1"
+	DefaultRuntimeHandler = "runhcs-wcow-process"
 )

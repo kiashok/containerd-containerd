@@ -19,6 +19,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/containerd/errdefs"
@@ -325,13 +326,16 @@ func (ce *criEventHandler) HandleEvent(any interface{}) error {
 		}
 	case *eventtypes.ImageCreate:
 		log.L.Infof("ImageCreate event %+v", e)
-		return ce.c.UpdateImage(ctx, e.Name)
+		log.L.Infof("ImageCreate event with name %+v", strings.Split(e.Name, ",")[0])
+		return ce.c.UpdateImage(ctx, strings.Split(e.Name, ",")[0])
 	case *eventtypes.ImageUpdate:
 		log.L.Infof("ImageUpdate event %+v", e)
-		return ce.c.UpdateImage(ctx, e.Name)
+		log.L.Infof("ImageUpdate event with name %+v", strings.Split(e.Name, ",")[0])
+		return ce.c.UpdateImage(ctx, strings.Split(e.Name, ",")[0])
 	case *eventtypes.ImageDelete:
 		log.L.Infof("ImageDelete event %+v", e)
-		return ce.c.UpdateImage(ctx, e.Name)
+		log.L.Infof("ImageDelete event with name %+v", strings.Split(e.Name, ",")[0])
+		return ce.c.UpdateImage(ctx, strings.Split(e.Name, ",")[0])
 	}
 
 	return nil

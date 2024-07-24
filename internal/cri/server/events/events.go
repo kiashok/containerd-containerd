@@ -153,7 +153,7 @@ func (em *EventMonitor) Start() <-chan error {
 					break
 				}
 				if err := em.eventHandler.HandleEvent(evt); err != nil {
-					log.L.WithError(err).Errorf("Failed to handle event %+v for %s", evt, id)
+					log.L.Errorf("Failed to handle event %+v for %s, err %v", evt, id, err)
 					em.backOff.enBackOff(id, evt)
 				}
 			case err := <-em.errCh:
