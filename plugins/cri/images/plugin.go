@@ -107,6 +107,7 @@ func init() {
 			options.ImageFSPaths[defaultSnapshotter] = snapshotRoot
 			log.L.Infof("Get image filesystem path %q for snapshotter %q", snapshotRoot, defaultSnapshotter)
 
+			//time.Sleep(30 * time.Second)
 			for runtimeName, rp := range config.RuntimePlatforms {
 				snapshotter := rp.Snapshotter
 				if snapshotter == "" {

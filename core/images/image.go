@@ -259,12 +259,12 @@ func Manifest(ctx context.Context, provider content.Provider, image ocispec.Desc
 		if IsManifestType(desc.MediaType) {
 			p, err := validateAndReadBlob(ctx, provider, desc)
 			if err != nil {
-				return nil, err
+				return nil, fmt.Errorf("failed to validateAndReadBlob with err %v", err)
 			}
 
 			var manifest ocispec.Manifest
 			if err := json.Unmarshal(p, &manifest); err != nil {
-				return nil, err
+				return nil, fmt.Errorf("failed to unmarshal with err %v", err)
 			}
 
 			if desc.Digest != image.Digest && platform != nil {
@@ -275,7 +275,7 @@ func Manifest(ctx context.Context, provider content.Provider, image ocispec.Desc
 				if desc.Platform == nil {
 					imagePlatform, err := ConfigPlatform(ctx, provider, manifest.Config)
 					if err != nil {
-						return nil, err
+						return nil, fmt.Errorf("failed to configPlatform() with err %v", err)
 					}
 					if !platform.Match(imagePlatform) {
 						return nil, nil
@@ -293,12 +293,12 @@ func Manifest(ctx context.Context, provider content.Provider, image ocispec.Desc
 		} else if IsIndexType(desc.MediaType) {
 			p, err := validateAndReadBlob(ctx, provider, desc)
 			if err != nil {
-				return nil, err
+				return nil, fmt.Errorf("failed to validateAndReadBlob with err %v", err)
 			}
 
 			var idx ocispec.Index
 			if err := json.Unmarshal(p, &idx); err != nil {
-				return nil, err
+				return nil, fmt.Errorf("failed to unmarshal with err %v", err)
 			}
 
 			if platform == nil {
@@ -331,7 +331,7 @@ func Manifest(ctx context.Context, provider content.Provider, image ocispec.Desc
 		}
 		return nil, fmt.Errorf("unexpected media type %v for %v: %w", desc.MediaType, desc.Digest, errdefs.ErrNotFound)
 	}), image); err != nil {
-		return ocispec.Manifest{}, err
+		return ocispec.Manifest{}, fmt.Errorf("failed to last err %v", err)
 	}
 
 	if len(m) == 0 {
@@ -339,7 +339,7 @@ func Manifest(ctx context.Context, provider content.Provider, image ocispec.Desc
 		if wasIndex {
 			err = fmt.Errorf("no match for platform in manifest %v: %w", image.Digest, errdefs.ErrNotFound)
 		}
-		return ocispec.Manifest{}, err
+		return ocispec.Manifest{}, fmt.Errorf("failed to last2 with err %v", err)
 	}
 	return *m[0].m, nil
 }

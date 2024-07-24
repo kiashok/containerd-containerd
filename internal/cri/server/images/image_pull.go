@@ -56,6 +56,8 @@ import (
 	"github.com/containerd/containerd/v2/pkg/tracing"
 )
 
+var ctrdImageNameWithRuntimeHandler string = "%s,%s"
+
 // For image management:
 // 1) We have an in-memory metadata index to:
 //   a. Maintain ImageID -> RepoTags, ImageID -> RepoDigset relationships; ImageID
@@ -371,7 +373,7 @@ func (c *CRIImageService) getLabels(ctx context.Context, name string) map[string
 	return labels
 }
 
-func findMatchingRuntimeHandlers(platform imagespec.Platform, snapshot string, runtimePlatforms map[string]ImagePlatform) []string {
+func FindMatchingRuntimeHandlers(platform imagespec.Platform, snapshot string, runtimePlatforms map[string]ImagePlatform) []string {
 	//log.G(context.Background()).Debugf("!! find for platform %v, snapshot %v", platform, snapshot)
 	listOfRuntimeHandlers := []string{}
 	for runtimeHandler, runtimePlatform := range runtimePlatforms {
@@ -409,7 +411,7 @@ func (c *CRIImageService) updateCacheWithValidRuntimeHandlers(ctx context.Contex
 		return fmt.Errorf("failed to parse image reference %q: %w", r, err)
 	}
 	repoDigest, repoTag := getRepoDigestAndTag(namedRef, rootImg.Target.Digest /* isSchema1 */, false)
-
+	log.G(ctx).Debugf("!! adding imageID %v, repoDigest %v repoTag %v", imageID, repoDigest, repoTag)
 	log.G(ctx).Debugf("!! list of runtimehandlers %v", runtimeHandlers)
 	for _, runtimeHandler := range runtimeHandlers {
 		// check if entry for this (image, runtimeHandler) already exists in containerd metadata store. Then do nothing & continue
@@ -424,7 +426,7 @@ func (c *CRIImageService) updateCacheWithValidRuntimeHandlers(ctx context.Contex
 				continue
 			}
 
-			refNameWithRuntimeHandler := fmt.Sprintf("%s, %s", ref, runtimeHandler)
+			refNameWithRuntimeHandler := fmt.Sprintf(ctrdImageNameWithRuntimeHandler, ref, runtimeHandler)
 			_, err := c.client.GetImage(ctx, refNameWithRuntimeHandler)
 			if err != nil {
 				if !errdefs.IsNotFound(err) {
@@ -463,9 +465,9 @@ func (c *CRIImageService) updateCacheWithValidRuntimeHandlers(ctx context.Contex
 			if err != nil {
 				if !errdefs.IsAlreadyExists(err) {
 					return fmt.Errorf("failed to create image, runtimeHandler with %w", err)
-				} else {
-					continue
-				}
+				} //else {
+				//continue
+				//}
 			}
 			// Update image store to reflect the newest state in containerd.
 			// No need to use `updateImage`, because the image reference must
@@ -508,9 +510,15 @@ func (c *CRIImageService) UpdateImage(ctx context.Context, r string) error {
 			if err := c.imageStore.Update(ctx, ref, runtimeHandler); err != nil {
 				return fmt.Errorf("update image store for %q: %w", r, err)
 			}
-
 			return nil
 		}
+
+		err = c.imageStore.Update(ctx, str[0], runtimeHandler)
+		log.G(ctx).Debugf("!! update cache for ref-rh %v , returned error %v", r, err)
+		if err != nil {
+			return fmt.Errorf("failed to update image store %q: %w", r, err)
+		}
+		return nil
 	}
 
 	// TODO: Use image service
@@ -536,9 +544,9 @@ func (c *CRIImageService) UpdateImage(ctx context.Context, r string) error {
 	}
 	log.G(ctx).Debugf("configDigest %v, platform %v, snpashot %v, snapshotID %v", configDesc, platform, snapshot, snapshotID)
 	if snapshot == "" {
-		return fmt.Errorf("!! empty snapshot returned!!!!")
+		return fmt.Errorf("!! empty snapshot returned")
 	}
-	runtimeHandlers = append(runtimeHandlers, findMatchingRuntimeHandlers(platform, snapshot, c.runtimePlatforms)...)
+	runtimeHandlers = append(runtimeHandlers, FindMatchingRuntimeHandlers(platform, snapshot, c.runtimePlatforms)...)
 	if len(runtimeHandlers) == 0 {
 		runtimeHandlers = append(runtimeHandlers, defaults.DefaultRuntimeHandler)
 	}
