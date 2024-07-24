@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/containerd/containerd/v2/core/content"
@@ -113,7 +114,7 @@ type store struct {
 	pinnedRefs map[string]sets.Set[RefKey]
 }
 
-var newImageNameFormat string = "%s, %s"
+var newImageNameFormat string = "%s,%s"
 
 // NewStore creates an image store.
 func NewStore(img Getter, provider content.InfoReaderProvider, platforms map[string]imagespec.Platform) *Store {
@@ -131,20 +132,57 @@ func NewStore(img Getter, provider content.InfoReaderProvider, platforms map[str
 	}
 }
 
+func runtimeHandlerFromImageName(ref string) (string, string) {
+	strs := strings.Split(ref, ",")
+	if len(strs) == 2 && strs[1] != "" {
+		imageName := strs[0]
+		runtimeHandler := strs[1]
+		return imageName, runtimeHandler
+	}
+	return ref, ""
+}
+
 // Update updates cache for a reference.
 func (s *Store) Update(ctx context.Context, ref string, runtimeHandler string) error {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
-	//imageNameWithRuntimeHandler := fmt.Sprintf(newImageNameFormat, ref, runtimeHandler)
-	i, err := s.images.Get(ctx, ref)
+	// check if this ref has runtimehandler associated with it
+	/*
+		strs := strings.Split(ref, ",")
+		if len(strs) == 2 && strs[1] != "" {
+			imageName := strs[0]
+			runtimeHandler := strs[1]
+		}
+	*/
+
+	imageNameWithRuntimeHandler := fmt.Sprintf(newImageNameFormat, ref, runtimeHandler)
+	_, err := s.images.Get(ctx, imageNameWithRuntimeHandler)
+	if err != nil && errdefs.IsNotFound(err) {
+		//return fmt.Errorf("get image from containerd: %w", err)
+		/*
+			rootImg, err := s.images.Get(ctx, ref)
+			if err != nil {
+				return fmt.Errorf("failed to get root image for ref %v, runtimeHandler %v with err: %v", ref, runtimeHandler, err)
+			}
+			img, err := s.getImage(ctx, rootImg, runtimeHandler)
+			if err != nil {
+				return fmt.Errorf("get image info from containerd: %w", err)
+			}
+
+		*/
+		refKey := RefKey{Ref: ref, RuntimeHandler: runtimeHandler}
+		return s.update(refKey, nil)
+	}
+
+	rootImg, err := s.images.Get(ctx, ref)
 	if err != nil && !errdefs.IsNotFound(err) {
-		return fmt.Errorf("get image from containerd: %w", err)
+		return fmt.Errorf("failed to get root image for ref %v, runtimeHandler %v with err: %v", ref, runtimeHandler, err)
 	}
 
 	var img *Image
 	if err == nil {
-		img, err = s.getImage(ctx, i, runtimeHandler)
+		img, err = s.getImage(ctx, rootImg, runtimeHandler)
 		if err != nil {
 			return fmt.Errorf("get image info from containerd: %w", err)
 		}

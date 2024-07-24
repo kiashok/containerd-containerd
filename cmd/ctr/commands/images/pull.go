@@ -99,6 +99,8 @@ command. As part of this process, we do the following:
 		}
 		defer cancel()
 
+		time.Sleep(30 * time.Second)
+
 		if !context.Bool("local") {
 			ch, err := commands.NewStaticCredentials(ctx, context, ref)
 			if err != nil {
