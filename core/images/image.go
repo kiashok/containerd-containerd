@@ -33,6 +33,8 @@ import (
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
+const gcSnapshotLabel string = "containerd.io/gc.ref.snapshot."
+
 // Image provides the model for how containerd views container images.
 type Image struct {
 	// Name of the image.
@@ -110,11 +112,6 @@ func (image *Image) Config(ctx context.Context, provider content.Provider, platf
 	return Config(ctx, provider, image.Target, platform)
 }
 
-/*
-func () {
-
-}
-*/
 // RootFS returns the unpacked diffids that make up and images rootfs.
 //
 // These are used to verify that a set of layers unpacked to the expected
@@ -144,6 +141,7 @@ type platformManifest struct {
 	m *ocispec.Manifest
 }
 
+// getInfoFromManifest returns the platform and snapshot information from the manifest for the given image.
 func getInfoFromManifest(ctx context.Context, cs content.Store, target ocispec.Descriptor) (configDigest digest.Digest, platform ocispec.Platform, snapshot string, snapshotID string, err error) {
 	snapshot = ""
 	snapshotID = ""
@@ -159,8 +157,6 @@ func getInfoFromManifest(ctx context.Context, cs content.Store, target ocispec.D
 			return "", ocispec.Platform{}, "", "", fmt.Errorf("failed to unmarshal manifest: %v", err)
 		}
 
-		// read config and
-
 		configDigest := manifest.Config.Digest
 		contentInfo, err := cs.Info(ctx, configDigest)
 		if err != nil {
@@ -168,11 +164,11 @@ func getInfoFromManifest(ctx context.Context, cs content.Store, target ocispec.D
 		}
 		labels := contentInfo.Labels
 		for key := range labels {
-			if strings.HasPrefix(key, "containerd.io/gc.ref.snapshot.") {
+			if strings.HasPrefix(key, gcSnapshotLabel) {
 				// this gc has to be removed, new entry should be inserted into containerd image store
 				// and its labels should be updated.
 				//				return configDesc, *target.Platform, strings.TrimPrefix(key, "containerd.io/gc.ref.snapshot."), value, nil
-				snapshot = strings.TrimPrefix(key, "containerd.io/gc.ref.snapshot.")
+				snapshot = strings.TrimPrefix(key, gcSnapshotLabel)
 				snapshotID = labels[key]
 				platform = *target.Platform
 				break
@@ -185,8 +181,8 @@ func getInfoFromManifest(ctx context.Context, cs content.Store, target ocispec.D
 	return configDigest, platform, snapshot, snapshotID, nil
 }
 
-// configDesc, platform, snapshot, snapshotID, err
-func FindPlatformAndRuntimeHandlerToUpdate(ctx context.Context, cs content.Store, target ocispec.Descriptor) (digest.Digest, ocispec.Platform, string, string, error) {
+// FindImagePlatformAndSnapshotter finds the platform and snapshotter used to unpack the given target image
+func FindImagePlatformAndSnapshotter(ctx context.Context, cs content.Store, target ocispec.Descriptor) (digest.Digest, ocispec.Platform, string, string, error) {
 	if IsIndexType(target.MediaType) {
 		// read the manifest list blob
 		p, err := validateAndReadBlob(ctx, cs, target)
@@ -202,22 +198,19 @@ func FindPlatformAndRuntimeHandlerToUpdate(ctx context.Context, cs content.Store
 		for _, manifestDesc := range idx.Manifests {
 			manifestPlatform := manifestDesc.Platform
 			if manifestPlatform == nil {
-				// return idx.Manifests, nil
-				// just skip?? so you can use the default platform handler is nothing?
+				// skip if no platform found in the manifest so default runtimehandler can be used
 				continue
 			}
-			// get the config
-			//config := manifest.Config
-			var err error
+
 			configDigest, platform, snapshot, snapshotID, err := getInfoFromManifest(ctx, cs, manifestDesc)
-			log.G(ctx).Debugf("!! snapshot %v, snoashotID %v", snapshot, snapshotID)
 			if err != nil {
 				continue
 			}
-			if reflect.DeepEqual(platform, ocispec.Platform{}) { // basicaly check if platform is empty
+			// Chheck if platform is empty
+			if reflect.DeepEqual(platform, ocispec.Platform{}) {
 				platform = *manifestPlatform
 			}
-			return configDigest, platform, snapshot, snapshotID, nil /// should you see if anything else needs to be updated or just first hit?
+			return configDigest, platform, snapshot, snapshotID, nil
 		}
 	}
 	return "", ocispec.Platform{}, "", "", nil

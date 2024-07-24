@@ -19,9 +19,7 @@ package images
 import (
 	"context"
 	"fmt"
-	"strings"
 	"sync"
-	"time"
 
 	"github.com/containerd/containerd/v2/core/images"
 	"github.com/containerd/log"
@@ -32,46 +30,38 @@ import (
 // be used for CRI. It may try to recover images which are not ready
 // but will only log errors, not return any.
 func (c *CRIImageService) CheckImages(ctx context.Context) error {
-	// TODO: Move way from `client.ListImages` to directly using image store
-	time.Sleep(30 * time.Second)
 	imageList, err := c.images.List(ctx)
 	if err != nil {
 		return fmt.Errorf("unable to list images: %w", err)
 	}
-	for ind := range imageList {
-		log.G(ctx).Debugf("!! client.ListImages %v", imageList[ind].Name)
-	}
 
-	// TODO: Support all snapshotter
-	//snapshotter := c.config.Snapshotter
 	var wg sync.WaitGroup
 	for _, i := range imageList {
 		wg.Add(1)
-		//consider only images that have image.Name as (id, runtimehandler)
 		i := i
 
 		go func() {
 			defer wg.Done()
-			// find valid runtime handlers for this ref
-			strs := strings.Split(i.Name, ",")
-			runtimeHandler := ""
-			ref := ""
-			if len(strs) == 2 && strs[1] != "" {
-				runtimeHandler = strs[1]
-				ref = strs[0]
+			// TODO: actually only consider the root image for unpack as the RuntimePlatform values
+			// could have changed during restart of containerd. Also ensure to explicitly call delete on
+			// the tuples first so we do not duplicate.. OR should the else case be doing smth in UpdateCache() in image_pull.go??
+			// Consider only images that have image.Name as touple of (ref, runtimehandler)
+			ref, runtimeHandler := RuntimeHandlerFromImageName(i.Name)
+			if runtimeHandler != "" {
 			} else {
-				// no runtime handler which means root images, therefore skip
+				// no runtime handler which means this is a root image, therefore skip
 				return
 			}
 
-			log.G(ctx).Debugf("!! trying to load i.Name %v, RH %v, platform %v", ref, runtimeHandler, c.config.RuntimePlatforms[runtimeHandler].Platform)
 			platformForRuntimeHandler := platforms.MustParse(c.config.RuntimePlatforms[runtimeHandler].Platform)
 			ok, _, _, _, err := images.Check(ctx, c.content, i.Target, platforms.Only(platformForRuntimeHandler))
 			if err != nil {
+				// TODO: Should we delete this image from containerd store?
 				log.G(ctx).WithError(err).Errorf("Failed to check image content readiness for %q", ref)
 				return
 			}
 			if !ok {
+				// TODO: Should we delete this image from containerd store?
 				log.G(ctx).Warnf("The image content readiness for %q is not ok", ref)
 				return
 			}
@@ -80,10 +70,9 @@ func (c *CRIImageService) CheckImages(ctx context.Context) error {
 				return
 			}
 			log.G(ctx).Debugf("Loaded image %q", ref)
-			//	}
 		}()
 	}
 	wg.Wait()
-	log.G(ctx).Debugf("!! loaded all images")
+	// log.G(ctx).Debugf("!! loaded all images")
 	return nil
 }

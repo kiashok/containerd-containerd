@@ -45,10 +45,12 @@ func (c *GRPCCRIImageService) RemoveImage(ctx context.Context, r *runtime.Remove
 func (c *CRIImageService) RemoveImage(ctx context.Context, imageSpec *runtime.ImageSpec) error {
 	span := tracing.SpanFromContext(ctx)
 
+	// Use default runtime handler if none was passed
 	runtimeHandler := defaults.DefaultRuntimeHandler
 	if imageSpec.GetRuntimeHandler() != "" {
 		runtimeHandler = imageSpec.GetRuntimeHandler()
 	}
+	// Find entry from CRI cache store
 	image, err := c.LocalResolve(imageSpec.GetImage(), runtimeHandler)
 	if err != nil {
 		if errdefs.IsNotFound(err) {
@@ -68,7 +70,8 @@ func (c *CRIImageService) RemoveImage(ctx context.Context, imageSpec *runtime.Im
 			// someone else before this point.
 			opts = []images.DeleteOpt{images.SynchronousDelete()}
 		}
-		err = c.images.Delete(ctx, ref, opts...)
+		refNameWithRuntimeHandler := fmt.Sprintf(CtrdImageNameWithRuntimeHandler, ref, runtimeHandler)
+		err = c.images.Delete(ctx, refNameWithRuntimeHandler, opts...)
 		if err == nil || errdefs.IsNotFound(err) {
 			// Update image store to reflect the newest state in containerd.
 			if err := c.imageStore.Update(ctx, ref, runtimeHandler); err != nil {

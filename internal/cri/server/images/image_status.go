@@ -77,6 +77,7 @@ func toCRIImage(image imagestore.Image) *runtime.Image {
 		RepoDigests: repoDigests,
 		Size_:       uint64(image.Size),
 		Pinned:      image.Pinned,
+		Spec:        &runtime.ImageSpec{Image: image.Key.ID, RuntimeHandler: image.Key.RuntimeHandler},
 	}
 	uid, username := getUserFromImage(image.ImageSpec.Config.User)
 	if uid != nil {
