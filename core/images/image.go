@@ -180,6 +180,8 @@ func getInfoFromManifest(ctx context.Context, cs content.Store, target ocispec.D
 		}
 		if snapshot != "" {
 			return configDigest, *target.Platform, snapshot, snapshotID, nil
+		} else {
+			return configDigest, *target.Platform, snapshot, snapshotID, fmt.Errorf("valid snapshot not found for image")
 		}
 	}
 	return configDigest, platform, snapshot, snapshotID, nil

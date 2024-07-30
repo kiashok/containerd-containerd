@@ -23,7 +23,6 @@ import (
 	containerd "github.com/containerd/containerd/v2/client"
 	"github.com/containerd/containerd/v2/core/content"
 	"github.com/containerd/containerd/v2/core/images"
-	"github.com/containerd/containerd/v2/core/leases"
 	"github.com/containerd/containerd/v2/core/snapshots"
 	"github.com/containerd/containerd/v2/defaults"
 	criconfig "github.com/containerd/containerd/v2/internal/cri/config"
@@ -73,8 +72,6 @@ type CRIImageService struct {
 	// one in-flight fetch request or unpack handler for a given descriptor's
 	// or chain ID.
 	unpackDuplicationSuppressor kmutex.KeyedLocker
-	// lease manager
-	leases leases.Manager
 }
 
 type GRPCCRIImageService struct {
@@ -93,8 +90,6 @@ type CRIImageServiceOptions struct {
 	Snapshotters map[string]snapshots.Snapshotter
 
 	Client imageClient
-
-	Leases leases.Manager
 }
 
 // NewService creates a new CRI Image Service
@@ -122,7 +117,6 @@ func NewService(config criconfig.ImageConfig, options *CRIImageServiceOptions) (
 		runtimePlatforms:            options.RuntimePlatforms,
 		snapshotStore:               snapshotstore.NewStore(),
 		unpackDuplicationSuppressor: kmutex.New(),
-		leases:                      options.Leases,
 	}
 
 	log.L.Info("Start snapshots syncer")

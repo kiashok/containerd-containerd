@@ -20,8 +20,10 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/containerd/containerd/v2/core/images"
+	"github.com/containerd/containerd/v2/defaults"
 	"github.com/containerd/log"
 	"github.com/containerd/platforms"
 )
@@ -35,6 +37,7 @@ func (c *CRIImageService) CheckImages(ctx context.Context) error {
 		return fmt.Errorf("unable to list images: %w", err)
 	}
 
+	time.Sleep(20 * time.Second)
 	var wg sync.WaitGroup
 	for _, i := range imageList {
 		wg.Add(1)
@@ -42,15 +45,12 @@ func (c *CRIImageService) CheckImages(ctx context.Context) error {
 
 		go func() {
 			defer wg.Done()
-			// TODO: actually only consider the root image for unpack as the RuntimePlatform values
-			// could have changed during restart of containerd. Also ensure to explicitly call delete on
-			// the tuples first so we do not duplicate.. OR should the else case be doing smth in UpdateCache() in image_pull.go??
-			// Consider only images that have image.Name as touple of (ref, runtimehandler)
+			// Check if image name is a tuple of (ref, runtimeHandler). If it is not,
+			// use the default runtime handler
 			ref, runtimeHandler := RuntimeHandlerFromImageName(i.Name)
 			if runtimeHandler != "" {
 			} else {
-				// no runtime handler which means this is a root image, therefore skip
-				return
+				runtimeHandler = defaults.DefaultRuntimeHandler
 			}
 
 			platformForRuntimeHandler := platforms.MustParse(c.config.RuntimePlatforms[runtimeHandler].Platform)

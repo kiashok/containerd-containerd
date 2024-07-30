@@ -46,7 +46,6 @@ import (
 	"github.com/containerd/containerd/v2/core/diff"
 	"github.com/containerd/containerd/v2/core/images"
 	containerdimages "github.com/containerd/containerd/v2/core/images"
-	"github.com/containerd/containerd/v2/core/leases"
 	"github.com/containerd/containerd/v2/core/remotes/docker"
 	"github.com/containerd/containerd/v2/core/remotes/docker/config"
 	"github.com/containerd/containerd/v2/defaults"
@@ -130,36 +129,6 @@ func (c *GRPCCRIImageService) PullImage(ctx context.Context, r *runtime.PullImag
 	return &runtime.PullImageResponse{ImageRef: ref}, nil
 }
 
-func (c *CRIImageService) withLease(ctx context.Context) (context.Context, func(context.Context) error, error) {
-	nop := func(context.Context) error { return nil }
-
-	_, ok := leases.FromContext(ctx)
-	if ok {
-		return ctx, nop, nil
-	}
-
-	ls := c.leases
-	if ls == nil {
-		return ctx, nop, nil
-	}
-
-	// Use default lease configuration if no options provided
-	opts := []leases.Opt{
-		leases.WithRandomID(),
-		leases.WithExpiration(24 * time.Hour),
-	}
-
-	l, err := ls.Create(ctx, opts...)
-	if err != nil {
-		return ctx, nop, err
-	}
-
-	ctx = leases.WithLease(ctx, l.ID)
-	return ctx, func(ctx context.Context) error {
-		return ls.Delete(ctx, l)
-	}, nil
-}
-
 func (c *CRIImageService) PullImage(ctx context.Context, name string, credentials func(string) (string, string, error), sandboxConfig *runtime.PodSandboxConfig, runtimeHandler string) (_ string, err error) {
 	span := tracing.SpanFromContext(ctx)
 	defer func() {
@@ -171,13 +140,6 @@ func (c *CRIImageService) PullImage(ctx context.Context, name string, credential
 			imagePulls.WithValues("success").Inc()
 		}
 	}()
-
-	// create lease on context
-	ctx, done, err := c.withLease(ctx)
-	if err != nil {
-		return "", fmt.Errorf("failed to create lease on context %v", err)
-	}
-	defer done(ctx)
 
 	inProgressImagePulls.Inc()
 	defer inProgressImagePulls.Dec()
@@ -444,9 +406,6 @@ func (c *CRIImageService) updateCacheWithValidRuntimeHandlers(ctx context.Contex
 		return fmt.Errorf("error finding platform/snapshot for image: %v. Err: %v, platform %v snapshot %v", ref, err, platform, snapshot)
 	}
 
-	if snapshot == "" {
-		return fmt.Errorf("!!!! snapshot nil for image: %v", ref)
-	}
 	// 2. Use the info from above to find all matching runtime handlers with identical platform and snapshot values defined in CRIImageService
 	// If there are no matching runtime handlers found, use default runtime handler defined.
 	runtimeHandlers := findMatchingRuntimeHandlers(platform, snapshot, c.runtimePlatforms)
@@ -475,12 +434,9 @@ func (c *CRIImageService) updateCacheWithValidRuntimeHandlers(ctx context.Contex
 	// Construct additional image labels. The snapshot and rootImgID labels help to add references to
 	// the unpacked image and the root image entry's imageID. This prevents garbage collection from cleaning
 	// up the root image before all the image entries referencing it are removed.
-	//imageID := configDesc.String()
 	snapshotLabel := fmt.Sprintf("%s.%s", gcSnapshotLabel, snapshot)
-	//rootImgIDLabel := fmt.Sprintf("%s.%s", gcImageLabel, ref)
-	//rootImgIDLabel := fmt.Sprintf("%s.%s", gcImageLabel, imageID)
 	newLabels[snapshotLabel] = snapshotID
-	newLabels[gcImageLabel] = ref //imageID
+	newLabels[gcImageLabel] = ref
 
 	for _, runtimeHandler := range runtimeHandlers {
 		if ref == "" {
@@ -515,28 +471,27 @@ func (c *CRIImageService) updateCacheWithValidRuntimeHandlers(ctx context.Contex
 	if rootImg.Labels == nil {
 		rootImg.Labels = map[string]string{}
 	}
-	//rootImg.Labels[gcExpirationLabel] = time.Now().Add(24 * time.Hour).Format(time.RFC3339)
-	//rootImg.Labels[gcExpirationLabel] = time.Now().Format(time.RFC3339)
-	rootImg.Labels[gcExpirationLabel] = time.Now().Add(3 * time.Minute).Format(time.RFC3339)
-	rootImg.Labels[rootImageLabel] = "nil"
-	//rootImg.Labels[snapshotInfoLabel] = snapshotID
+	rootImg.Labels[gcExpirationLabel] = time.Now().Add(2 * time.Minute).Format(time.RFC3339)
+	rootImg.Labels[rootImageLabel] = "nil" // TODO: Do we need this??
 
 	_, err = c.images.Update(ctx, rootImg, fieldpaths...)
 	if err != nil {
 		return fmt.Errorf("failed to update labels on root image %v", rootImg.Name)
 	}
 
-	// delete reference from config to snapshot in content store
+	// Add a snapshot info label to the config to help subsequent calls identify snapshotID.
+	// Add label, update content store and then get rid of snapshot gc to avoid losing
+	// information as gc could kick in immediately.
 	cs := c.content
 	contentInfo, err := cs.Info(ctx, configDesc)
 	if err != nil {
 		return fmt.Errorf("error getting content store for image %v", configDesc.String())
 	}
+
 	csLabels := contentInfo.Labels
 	if csLabels != nil {
 		csLabels[fmt.Sprintf("%s.%s", snapshotInfoLabel, snapshot)] = snapshotID
 	}
-	//delete(csLabels, snapshotLabel)
 	_, err = cs.Update(ctx, contentInfo, fieldpaths...)
 	if err != nil {
 		return fmt.Errorf("error update content store labels for image %v", configDesc.String())
@@ -568,7 +523,6 @@ func RuntimeHandlerFromImageName(ref string) (string, string) {
 // in containerd. If the reference is not managed by the cri plugin, the function also
 // generates necessary metadata for the image and make it managed.
 func (c *CRIImageService) UpdateImage(ctx context.Context, r string) error {
-
 	// Check if this ref has runtimehandler associated with it
 	ref, runtimeHandler := RuntimeHandlerFromImageName(r)
 	if runtimeHandler != "" {
@@ -601,8 +555,8 @@ func (c *CRIImageService) UpdateImage(ctx context.Context, r string) error {
 			return fmt.Errorf("get image by reference: %w", err)
 		}
 		log.G(ctx).Debugf("Root image not found. Clean up CRI image cache")
-		// If the root image is not found, we should continue updating the cache,
-		// so that all the image, runtimeHandler entries can be removed from the cri cache.
+		// If the root image is not found, we are in a bad state. Remove all references
+		// for this image from CRI cache and return error
 		if err := c.imageStore.RemoveAllReferences(ctx, r); err != nil {
 			return fmt.Errorf("update image store for %q: %w", r, err)
 		}
