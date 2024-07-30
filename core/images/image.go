@@ -33,7 +33,8 @@ import (
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
-const gcSnapshotLabel string = "containerd.io/gc.ref.snapshot."
+const gcSnapshotLabel string = "containerd.io/gc.ref.snapshot"
+const snapshotInfoLabel string = "containerd.io/snapshot-info"
 
 // Image provides the model for how containerd views container images.
 type Image struct {
@@ -165,10 +166,13 @@ func getInfoFromManifest(ctx context.Context, cs content.Store, target ocispec.D
 		labels := contentInfo.Labels
 		for key := range labels {
 			if strings.HasPrefix(key, gcSnapshotLabel) {
-				// this gc has to be removed, new entry should be inserted into containerd image store
-				// and its labels should be updated.
-				//				return configDesc, *target.Platform, strings.TrimPrefix(key, "containerd.io/gc.ref.snapshot."), value, nil
-				snapshot = strings.TrimPrefix(key, gcSnapshotLabel)
+				// This gc label is removed, once new (imageName, runtimeHandler) entry is made in the containerd image store.
+				snapshot = strings.TrimPrefix(key, gcSnapshotLabel+".")
+				snapshotID = labels[key]
+				platform = *target.Platform
+				break
+			} else if strings.HasPrefix(key, snapshotInfoLabel) {
+				snapshot = strings.TrimPrefix(key, snapshotInfoLabel+".")
 				snapshotID = labels[key]
 				platform = *target.Platform
 				break

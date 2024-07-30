@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 
 	containerd "github.com/containerd/containerd/v2/client"
+	"github.com/containerd/containerd/v2/core/leases"
 	"github.com/containerd/containerd/v2/core/metadata"
 	"github.com/containerd/containerd/v2/core/snapshots"
 	criconfig "github.com/containerd/containerd/v2/internal/cri/config"
@@ -78,6 +79,12 @@ func init() {
 				Snapshotters:     map[string]snapshots.Snapshotter{},
 				ImageFSPaths:     map[string]string{},
 			}
+
+			l, err := ic.GetSingle(plugins.LeasePlugin)
+			if err != nil {
+				return nil, err
+			}
+			options.Leases = l.(leases.Manager)
 
 			options.Client, err = containerd.New(
 				"",
