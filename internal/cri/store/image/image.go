@@ -45,7 +45,7 @@ type RefKey struct {
 	RuntimeHandler string
 }
 
-type ImageIDKey struct {
+type ImageIDKey struct { //nolint:staticcheck
 	// Id of the image. Normally the digest of image config.
 	ID string
 	// RuntimeHandler used for pulling this image
@@ -113,7 +113,7 @@ type store struct {
 	pinnedRefs map[string]sets.Set[RefKey]
 }
 
-var newImageNameFormat string = "%s,%s"
+var newImageNameFormat = "%s,%s"
 
 // NewStore creates an image store.
 func NewStore(img Getter, provider content.InfoReaderProvider, defaultRuntimeName string, platforms map[string]imagespec.Platform) *Store {
