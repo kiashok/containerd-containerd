@@ -166,7 +166,6 @@ func getInfoFromManifest(ctx context.Context, cs content.Store, target ocispec.D
 		labels := contentInfo.Labels
 		for key := range labels {
 			if strings.HasPrefix(key, gcSnapshotLabel) {
-				// This gc label is removed, once new (imageName, runtimeHandler) entry is made in the containerd image store.
 				snapshot = strings.TrimPrefix(key, gcSnapshotLabel+".")
 				snapshotID = labels[key]
 				platform = *target.Platform
@@ -179,9 +178,9 @@ func getInfoFromManifest(ctx context.Context, cs content.Store, target ocispec.D
 			}
 		}
 		if snapshot != "" {
-			return configDigest, *target.Platform, snapshot, snapshotID, nil
+			return configDigest, platform, snapshot, snapshotID, nil
 		} else {
-			return configDigest, *target.Platform, snapshot, snapshotID, fmt.Errorf("valid snapshot not found for image")
+			return configDigest, platform, snapshot, snapshotID, fmt.Errorf("valid snapshot not found for image")
 		}
 	}
 	return configDigest, platform, snapshot, snapshotID, nil
@@ -189,6 +188,7 @@ func getInfoFromManifest(ctx context.Context, cs content.Store, target ocispec.D
 
 // FindImagePlatformAndSnapshotter finds the platform and snapshotter used to unpack the given target image
 func FindImagePlatformAndSnapshotter(ctx context.Context, cs content.Store, target ocispec.Descriptor) (digest.Digest, ocispec.Platform, string, string, error) {
+	var lastError error
 	if IsIndexType(target.MediaType) {
 		// read the manifest list blob
 		p, err := validateAndReadBlob(ctx, cs, target)
@@ -210,6 +210,7 @@ func FindImagePlatformAndSnapshotter(ctx context.Context, cs content.Store, targ
 
 			configDigest, platform, snapshot, snapshotID, err := getInfoFromManifest(ctx, cs, manifestDesc)
 			if err != nil {
+				lastError = err
 				continue
 			}
 			// Chheck if platform is empty
@@ -219,7 +220,7 @@ func FindImagePlatformAndSnapshotter(ctx context.Context, cs content.Store, targ
 			return configDigest, platform, snapshot, snapshotID, nil
 		}
 	}
-	return "", ocispec.Platform{}, "", "", nil
+	return "", ocispec.Platform{}, "", "", lastError
 }
 
 func validateAndReadBlob(ctx context.Context, provider content.Provider, desc ocispec.Descriptor) ([]byte, error) {
