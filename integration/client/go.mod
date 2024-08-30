@@ -1,6 +1,6 @@
 module github.com/containerd/containerd/integration/client
 
-go 1.22
+go 1.22.0
 
 require (
 	github.com/AdaLogics/go-fuzz-headers v0.0.0-20230811130428-ced1acdcaa24
@@ -80,4 +80,7 @@ require (
 // resolution if newer.
 replace github.com/containerd/containerd => ../../
 
-replace github.com/containerd/containerd/api => ../../api
+replace (
+	github.com/Microsoft/hcsshim => ../../../hcsshim
+	github.com/containerd/containerd/api => ../../api
+)
