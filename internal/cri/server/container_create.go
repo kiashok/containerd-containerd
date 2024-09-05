@@ -935,10 +935,6 @@ func (c *criService) buildWindowsSpec(
 		if config.Windows.Resources.AffinityCpus != nil {
 			specOpts = append(specOpts, oci.WithAffinityCPUs(config.Windows.Resources.AffinityCpus))
 		}
-
-		if config.Windows.Resources.AffinityPrefferedNumaNodes != nil {
-			specOpts = append(specOpts, oci.WithAffinityPrefferedNumaNodes(config.Windows.Resources.AffinityPrefferedNumaNodes))
-		}
 	}
 
 	return specOpts, nil

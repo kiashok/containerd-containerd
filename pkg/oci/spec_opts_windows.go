@@ -19,7 +19,6 @@ package oci
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 
 	specs "github.com/opencontainers/runtime-spec/specs-go"
@@ -63,31 +62,10 @@ func WithAffinityCPUs(affinityCPUs []*runtime.WindowsCpuGroupAffinity) SpecOpts 
 			s.Windows.Resources.CPU.AffinityCPUs = make([]specs.WindowsCPUGroupAffinity, len(affinityCPUs))
 		}
 		for i, cpu := range affinityCPUs {
-			fmt.Printf("!! cpu i %v, value %v", i, cpu)
+			//			fmt.Printf("!! cpu i %v, value %v", i, cpu)
 			s.Windows.Resources.CPU.AffinityCPUs[i].CPUMask = cpu.CpuMask
 			s.Windows.Resources.CPU.AffinityCPUs[i].CPUGroup = cpu.CpuGroup
 		}
-		return nil
-	}
-}
-
-func WithAffinityPrefferedNumaNodes(affinityPrefferedNumaNodes []uint32) SpecOpts {
-	return func(_ context.Context, _ Client, c *containers.Container, s *Spec) error {
-		if affinityPrefferedNumaNodes == nil {
-			return nil
-		}
-		// We would expect the Windows and Resources struct to be setup by now
-		if s.Windows == nil || s.Windows.Resources == nil {
-			return nil
-		}
-		if s.Windows.Resources.CPU == nil {
-			s.Windows.Resources.CPU = &specs.WindowsCPUResources{}
-		}
-		if s.Windows.Resources.CPU.AffinityPreferredNumaNodes == nil {
-			s.Windows.Resources.CPU.AffinityPreferredNumaNodes = make([]uint32, len(affinityPrefferedNumaNodes))
-		}
-
-		copy(s.Windows.Resources.CPU.AffinityPreferredNumaNodes, affinityPrefferedNumaNodes)
 		return nil
 	}
 }
