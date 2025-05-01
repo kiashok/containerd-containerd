@@ -19,12 +19,23 @@ package images
 import (
 	"context"
 	"fmt"
-	"sync"
-
 	"github.com/containerd/containerd/v2/core/images"
 	"github.com/containerd/log"
 	"github.com/containerd/platforms"
+	specs "github.com/opencontainers/image-spec/specs-go/v1"
+	"sync"
 )
+
+func (c *CRIImageService) getRuntimePlatform(runtimeHandler string) *specs.Platform {
+	if runtimeHandler == "" || c.config.RuntimePlatforms == nil {
+		return nil
+	}
+	if p, ok := c.config.RuntimePlatforms[runtimeHandler]; ok {
+		parsed := platforms.MustParse(p.Platform)
+		return &parsed
+	}
+	return nil
+}
 
 // LoadImages checks all existing images to ensure they are ready to
 // be used for CRI. It may try to recover images which are not ready
@@ -38,20 +49,18 @@ func (c *CRIImageService) CheckImages(ctx context.Context) error {
 	var wg sync.WaitGroup
 	for _, i := range imageList {
 		wg.Add(1)
-		i := i
 		go func() {
 			defer wg.Done()
 			// Check if image name is a tuple of (ref, runtimeHandler). If it is not,
 			// use the default runtime handler
-			ref, runtimeHandler := RuntimeHandlerFromImageName(i.Name)
-			platformForRuntimeHandler := platforms.DefaultSpec()
-			if runtimeHandler != "" && c.config.RuntimePlatforms != nil {
-				if runtimePlatform, ok := c.config.RuntimePlatforms[runtimeHandler]; ok {
-					platformForRuntimeHandler = platforms.MustParse(runtimePlatform.Platform)
-				}
+			ref, runtimeHandler := GetRuntimeHandlerFromRef(i.Name)
+			platform := platforms.DefaultSpec()
+			if rhPlatform := c.getRuntimePlatform(runtimeHandler); rhPlatform != nil {
+				platform = *rhPlatform
 			}
 
-			ok, _, _, _, err := images.Check(ctx, c.content, i.Target, platforms.Only(platformForRuntimeHandler))
+			platformMatcher := platforms.Only(platform)
+			ok, _, _, _, err := images.Check(ctx, c.content, i.Target, platformMatcher)
 			if err != nil {
 				// TODO: Should we delete this image from containerd store?
 				log.G(ctx).WithError(err).Errorf("Failed to check image content readiness for %q", ref)

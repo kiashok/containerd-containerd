@@ -86,6 +86,16 @@ func (c *criService) getSandboxRootDir(id string) string {
 	return filepath.Join(c.config.RootDir, sandboxesDir, id)
 }
 
+// getImageVolumeHostPath returns the image volume directory for share.
+func (c *criService) getImageVolumeHostPath(podID, imageID string) string {
+	return filepath.Join(c.config.StateDir, imageVolumeDir, podID, imageID)
+}
+
+// getImageVolumeBaseDir returns the image volume base directory for cleanup.
+func (c *criService) getImageVolumeBaseDir(podID string) string {
+	return filepath.Join(c.config.StateDir, imageVolumeDir, podID)
+}
+
 // getVolatileSandboxRootDir returns the root directory for managing volatile sandbox files,
 // e.g. named pipes.
 func (c *criService) getVolatileSandboxRootDir(id string) string {
@@ -142,16 +152,6 @@ func (c *criService) getContainerRootDir(id string) string {
 	return filepath.Join(c.config.RootDir, containersDir, id)
 }
 
-// getImageVolumeHostPath returns the image volume directory for share.
-func (c *criService) getImageVolumeHostPath(podID, imageID string) string {
-	return filepath.Join(c.config.StateDir, imageVolumeDir, podID, imageID)
-}
-
-// getImageVolumeBaseDir returns the image volume base directory for cleanup.
-func (c *criService) getImageVolumeBaseDir(podID string) string {
-	return filepath.Join(c.config.StateDir, imageVolumeDir, podID)
-}
-
 // getVolatileContainerRootDir returns the root directory for managing volatile container files,
 // e.g. named pipes.
 func (c *criService) getVolatileContainerRootDir(id string) string {
@@ -169,8 +169,7 @@ func (c *criService) toContainerdImage(ctx context.Context, image imagestore.Ima
 	if len(image.References) == 0 {
 		return nil, fmt.Errorf("invalid image with no reference %q", image.Key.ID)
 	}
-	platform := c.PlatformForRuntimeHandler(image.Key.RuntimeHandler)
-	return c.client.GetImageWithPlatform(ctx, image.References[0], platform)
+	return c.client.GetImage(ctx, image.References[0])
 }
 
 // getUserFromImage gets uid or user name of the image user.

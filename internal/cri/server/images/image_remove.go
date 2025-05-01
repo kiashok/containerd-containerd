@@ -20,6 +20,8 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/containerd/log"
+
 	"github.com/containerd/containerd/v2/core/images"
 	"github.com/containerd/containerd/v2/pkg/tracing"
 	"github.com/containerd/errdefs"
@@ -49,6 +51,7 @@ func (c *CRIImageService) RemoveImage(ctx context.Context, imageSpec *runtime.Im
 	if imageSpec.GetRuntimeHandler() != "" {
 		runtimeHandler = imageSpec.GetRuntimeHandler()
 	}
+	log.G(ctx).Debugf("CRI RemoveImage runtimehandler %v", runtimeHandler)
 	// Find entry from CRI cache store
 	image, err := c.LocalResolve(imageSpec.GetImage(), runtimeHandler)
 	if err != nil {
@@ -69,7 +72,7 @@ func (c *CRIImageService) RemoveImage(ctx context.Context, imageSpec *runtime.Im
 			// someone else before this point.
 			opts = []images.DeleteOpt{images.SynchronousDelete()}
 		}
-		refNameWithRuntimeHandler := fmt.Sprintf(ctrdImageNameWithRuntimeHandler, ref, runtimeHandler)
+		refNameWithRuntimeHandler := fmt.Sprintf(imageNameWithRuntimeHandler, ref, runtimeHandler)
 		err = c.images.Delete(ctx, refNameWithRuntimeHandler, opts...)
 		if err == nil || errdefs.IsNotFound(err) {
 			// Update image store to reflect the newest state in containerd.

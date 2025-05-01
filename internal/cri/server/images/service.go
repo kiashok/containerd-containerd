@@ -40,7 +40,9 @@ import (
 
 type imageClient interface {
 	ListImages(context.Context, ...string) ([]containerd.Image, error)
+	// TODO(kiashok): combine GetImage() and GetImageWithPlatform()
 	GetImage(context.Context, string) (containerd.Image, error)
+	GetImageWithPlatform(ctx context.Context, ref string, platform imagespec.Platform) (containerd.Image, error)
 	Pull(context.Context, string, ...containerd.RemoteOpt) (containerd.Image, error)
 }
 
