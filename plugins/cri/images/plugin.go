@@ -122,14 +122,7 @@ func init() {
 			}
 			options.ImageFSPaths[defaultSnapshotter] = snapshotRoot(defaultSnapshotter)
 			log.L.Infof("Get image filesystem path %q for snapshotter %q", options.ImageFSPaths[defaultSnapshotter], defaultSnapshotter)
-			//todo(kiashok)
-			if snapshotRoot == "" {
-				// Try a root in the same parent as this plugin
-				snapshotRoot = filepath.Join(filepath.Dir(ic.Properties[plugins.PropertyRootDir]), plugins.SnapshotPlugin.String()+"."+defaultSnapshotter)
-			}
 			options.DefaultRuntimeName = criconfig.DefaultRuntimeConfig().ContainerdConfig.DefaultRuntimeName
-			options.ImageFSPaths[defaultSnapshotter] = snapshotRoot
-			log.L.Infof("Get image filesystem path %q for snapshotter %q", snapshotRoot, defaultSnapshotter)
 
 			for runtimeName, rp := range config.RuntimePlatforms {
 				snapshotter := rp.Snapshotter
@@ -146,7 +139,7 @@ func init() {
 				if rp.Platform != "" {
 					p, err := platforms.Parse(rp.Platform)
 					// Platform specified for a specific runtime should have minimum of OS and arch specified.
-					if err != nil && isValidPlatformSpec(p) {
+					if err != nil || !isValidPlatformSpec(p) {
 						return nil, fmt.Errorf("unable to parse platform %q: %w", rp.Platform, err)
 					}
 					platform = p

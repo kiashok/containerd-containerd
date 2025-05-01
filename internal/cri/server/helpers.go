@@ -169,8 +169,7 @@ func (c *criService) toContainerdImage(ctx context.Context, image imagestore.Ima
 	if len(image.References) == 0 {
 		return nil, fmt.Errorf("invalid image with no reference %q", image.Key.ID)
 	}
-	platform := c.PlatformForRuntimeHandler(image.Key.RuntimeHandler)
-	return c.client.GetImageWithPlatform(ctx, image.References[0], platform)
+	return c.client.GetImage(ctx, image.References[0])
 }
 
 // getUserFromImage gets uid or user name of the image user.

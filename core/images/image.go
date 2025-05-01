@@ -20,7 +20,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"reflect"
 	"sort"
 	"strings"
 	"time"
@@ -34,8 +33,11 @@ import (
 )
 
 const (
-	gcSnapshotLabel   string = "containerd.io/gc.ref.snapshot"
-	snapshotInfoLabel string = "containerd.io/snapshot-info"
+	GcSnapshotLabel   string = "containerd.io/gc.ref.snapshot"
+	GcExpirationLabel string = "containerd.io/gc.expire"
+	GcImageLabel      string = "containerd.io/gc.ref.image"
+	RootImageLabel    string = "containerd.io/root-image"
+	SnapshotInfoLabel string = "containerd.io/snapshot"
 )
 
 // Image provides the model for how containerd views container images.
@@ -142,86 +144,6 @@ func (image *Image) Size(ctx context.Context, provider content.Provider, platfor
 type platformManifest struct {
 	p *ocispec.Platform
 	m *ocispec.Manifest
-}
-
-// getInfoFromManifest returns the platform and snapshot information from the manifest for the given image.
-func getInfoFromManifest(ctx context.Context, cs content.Store, target ocispec.Descriptor) (configDigest digest.Digest, platform ocispec.Platform, snapshot string, snapshotID string, err error) {
-	snapshot = ""
-	if IsManifestType(target.MediaType) {
-		// Read the manifest list blob
-		p, err := validateAndReadBlob(ctx, cs, target)
-		if err != nil {
-			return "", ocispec.Platform{}, "", "", err
-		}
-
-		var manifest ocispec.Manifest
-		if err := json.Unmarshal(p, &manifest); err != nil {
-			return "", ocispec.Platform{}, "", "", fmt.Errorf("failed to unmarshal manifest: %v", err)
-		}
-
-		configDigest := manifest.Config.Digest
-		contentInfo, err := cs.Info(ctx, configDigest)
-		if err != nil {
-			return "", ocispec.Platform{}, "", "", errdefs.ErrNotFound
-		}
-		labels := contentInfo.Labels
-		for key := range labels {
-			if strings.HasPrefix(key, gcSnapshotLabel) {
-				snapshot = strings.TrimPrefix(key, gcSnapshotLabel+".")
-				snapshotID = labels[key]
-				platform = *target.Platform
-				break
-			} else if strings.HasPrefix(key, snapshotInfoLabel) {
-				snapshot = strings.TrimPrefix(key, snapshotInfoLabel+".")
-				snapshotID = labels[key]
-				platform = *target.Platform
-				break
-			}
-		}
-		err = nil
-		if snapshot == "" {
-			err = fmt.Errorf("valid snapshot not found for image")
-		}
-		return configDigest, platform, snapshot, snapshotID, err
-	}
-	return configDigest, platform, snapshot, snapshotID, nil
-}
-
-// FindImagePlatformAndSnapshotter finds the platform and snapshotter used to unpack the given target image
-func FindImagePlatformAndSnapshotter(ctx context.Context, cs content.Store, target ocispec.Descriptor) (digest.Digest, ocispec.Platform, string, string, error) {
-	var lastError error
-	if IsIndexType(target.MediaType) {
-		// read the manifest list blob
-		p, err := validateAndReadBlob(ctx, cs, target)
-		if err != nil {
-			return "", ocispec.Platform{}, "", "", err
-		}
-
-		var idx ocispec.Index
-		if err := json.Unmarshal(p, &idx); err != nil {
-			return "", ocispec.Platform{}, "", "", err
-		}
-
-		for _, manifestDesc := range idx.Manifests {
-			manifestPlatform := manifestDesc.Platform
-			if manifestPlatform == nil {
-				// skip if no platform found in the manifest so default runtimehandler can be used
-				continue
-			}
-
-			configDigest, platform, snapshot, snapshotID, err := getInfoFromManifest(ctx, cs, manifestDesc)
-			if err != nil {
-				lastError = err
-				continue
-			}
-			// Check if platform is empty
-			if reflect.DeepEqual(platform, ocispec.Platform{}) {
-				platform = *manifestPlatform
-			}
-			return configDigest, platform, snapshot, snapshotID, nil
-		}
-	}
-	return "", ocispec.Platform{}, "", "", lastError
 }
 
 func validateAndReadBlob(ctx context.Context, provider content.Provider, desc ocispec.Descriptor) ([]byte, error) {
@@ -528,4 +450,92 @@ func ConfigPlatform(ctx context.Context, provider content.Provider, configDesc o
 		return ocispec.Platform{}, err
 	}
 	return platforms.Normalize(imagePlatform), nil
+}
+
+// UnpackedImageInfo is used to fetch details
+// of an unpacked image by walking from the root
+// index down to the configDesc.
+type UnpackedImageInfo struct {
+	ConfigDigest digest.Digest
+	Platform     ocispec.Platform
+	Snapshot     string
+	SnapshotID   string
+}
+
+// getPlatform returns the platform from given if not empty.
+func getPlatform(desc ocispec.Descriptor) ocispec.Platform {
+	if desc.Platform != nil {
+		return *desc.Platform
+	}
+	return ocispec.Platform{}
+}
+
+// getImageInfoFromManifest returns the platform and snapshot information from the manifest for the given image.
+func getImageInfoFromManifest(
+	ctx context.Context,
+	cs content.Store,
+	target ocispec.Descriptor,
+) (UnpackedImageInfo, error) {
+	if !IsManifestType(target.MediaType) {
+		return UnpackedImageInfo{}, nil
+	}
+	p, err := validateAndReadBlob(ctx, cs, target)
+	if err != nil {
+		return UnpackedImageInfo{}, err
+	}
+	var manifest ocispec.Manifest
+	if err := json.Unmarshal(p, &manifest); err != nil {
+		return UnpackedImageInfo{}, fmt.Errorf("failed to unmarshal manifest: %v", err)
+	}
+
+	configDigest := manifest.Config.Digest
+	contentInfo, err := cs.Info(ctx, configDigest)
+	if err != nil {
+		return UnpackedImageInfo{}, errdefs.ErrNotFound
+	}
+	labels := contentInfo.Labels
+	platform := getPlatform(target)
+	imgInfo := UnpackedImageInfo{
+		ConfigDigest: configDigest,
+		Platform:     platform,
+	}
+	for key, val := range labels {
+		if strings.HasPrefix(key, GcSnapshotLabel+".") {
+			imgInfo.SnapshotID = val
+			imgInfo.Snapshot = strings.TrimPrefix(key, GcSnapshotLabel+".")
+			return imgInfo, nil
+		} else if strings.HasPrefix(key, SnapshotInfoLabel+".") {
+			imgInfo.SnapshotID = val
+			imgInfo.Snapshot = strings.TrimPrefix(key, SnapshotInfoLabel+".")
+			return imgInfo, nil
+		}
+	}
+	return UnpackedImageInfo{}, fmt.Errorf("valid snapshot not found for image")
+}
+
+// GetUnpackedImageInfo finds the platform and snapshotter used to unpack the given target image
+func GetUnpackedImageInfo(
+	ctx context.Context,
+	cs content.Store,
+	target ocispec.Descriptor,
+) (UnpackedImageInfo, error) {
+	if !IsIndexType(target.MediaType) {
+		return UnpackedImageInfo{}, nil
+	}
+
+	children, err := Children(ctx, cs, target)
+	if err != nil {
+		return UnpackedImageInfo{}, err
+	}
+	for _, desc := range children {
+		if desc.Platform == nil {
+			continue
+		}
+		imgInfo, err := getImageInfoFromManifest(ctx, cs, desc)
+		if err != nil {
+			continue
+		}
+		return imgInfo, nil
+	}
+	return UnpackedImageInfo{}, fmt.Errorf("no valid manifest found")
 }

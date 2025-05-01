@@ -87,7 +87,7 @@ func (c *criService) stopContainer(ctx context.Context, container containerstore
 	sandboxID := container.SandboxID
 	sandbox, err := c.sandboxStore.Get(sandboxID)
 	if err != nil {
-		return fmt.Errorf("an error occurred when try to find container's sandbox %q: %w", id, err)
+		return fmt.Errorf("failed to find container's sandbox %q: %w", id, err)
 	}
 
 	// Return without error if container is not running. This makes sure that

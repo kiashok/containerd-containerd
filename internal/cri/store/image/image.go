@@ -19,6 +19,7 @@ package image
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -142,12 +143,14 @@ func (s *Store) Update(ctx context.Context, ref string, runtimeHandler string) e
 	if runtimeHandler == "" {
 		runtimeHandler = s.defaultRuntimeName
 	}
-	imageNameWithRuntimeHandler := fmt.Sprintf(newImageNameFormat, ref, runtimeHandler)
-	_, err := s.images.Get(ctx, imageNameWithRuntimeHandler)
-	// If tuple (ref, runtimeHandler) is not found in containerd metadata store,
-	// just remove the entry from CRI cache.
+	refKey := RefKey{Ref: ref, RuntimeHandler: runtimeHandler}
+	refWithRuntimeHdlr := fmt.Sprintf(newImageNameFormat, ref, runtimeHandler)
+
+	// Check if (ref, runtimeHandler) exists in containerd store
+	_, err := s.images.Get(ctx, refWithRuntimeHdlr)
+	// Remove the entry from CRI cache if tuple doesn't exist
+	// in containerd store
 	if err != nil && errdefs.IsNotFound(err) {
-		refKey := RefKey{Ref: ref, RuntimeHandler: runtimeHandler}
 		return s.update(refKey, nil)
 	}
 
@@ -163,7 +166,6 @@ func (s *Store) Update(ctx context.Context, ref string, runtimeHandler string) e
 			return fmt.Errorf("get image info from containerd: %w", err)
 		}
 	}
-	refKey := RefKey{Ref: ref, RuntimeHandler: runtimeHandler}
 	return s.update(refKey, img)
 }
 
@@ -172,14 +174,15 @@ func (s *Store) Update(ctx context.Context, ref string, runtimeHandler string) e
 func (s *Store) RemoveReference(ctx context.Context, ref string) error {
 	// TODO: check for error if ref is of form (id,runtimehandler) and return error
 	for refKey, imageIDKey := range s.refCache {
-		if refKey.Ref == ref {
-			// Remove the reference from the store.
-			s.store.delete(imageIDKey.ID, refKey)
-			s.deleteFromRefCache(refKey)
-
-			// Remove from containerd store
-			s.images.Delete(ctx, fmt.Sprintf(newImageNameFormat, ref, refKey.RuntimeHandler))
+		if refKey.Ref != ref {
+			continue
 		}
+		// Remove the reference from the store.
+		s.store.delete(imageIDKey.ID, refKey)
+		s.deleteFromRefCache(refKey)
+
+		// Remove from containerd store
+		s.images.Delete(ctx, fmt.Sprintf(newImageNameFormat, ref, refKey.RuntimeHandler))
 	}
 	return nil
 }
@@ -223,11 +226,12 @@ func (s *Store) update(refKey RefKey, img *Image) error {
 
 // getImage gets image information from containerd for current runtimeHandler.
 func (s *Store) getImage(ctx context.Context, i images.Image, runtimeHandler string) (*Image, error) {
-	// get platformMatcher to be used
-	platformMatcher := platforms.Only(platforms.DefaultSpec())
 	if runtimeHandler == "" {
 		runtimeHandler = s.defaultRuntimeName
-	} else if s.platforms != nil {
+	}
+
+	platformMatcher := platforms.Only(platforms.DefaultSpec())
+	if s.platforms != nil {
 		if platform, ok := s.platforms[runtimeHandler]; ok {
 			platformMatcher = platforms.Only(platform)
 		}
@@ -239,7 +243,11 @@ func (s *Store) getImage(ctx context.Context, i images.Image, runtimeHandler str
 	}
 	chainID := imageidentity.ChainID(diffIDs)
 
-	size, err := usage.CalculateImageUsage(ctx, i, s.provider, usage.WithManifestLimit(platformMatcher, 1), usage.WithManifestUsage())
+	size, err := usage.CalculateImageUsage(
+		ctx, i, s.provider,
+		usage.WithManifestLimit(platformMatcher, 1),
+		usage.WithManifestUsage(),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("get image compressed resource size: %w", err)
 	}
@@ -318,7 +326,7 @@ func (s *store) add(img Image) error {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	if _, err := s.digestSet.Lookup(img.Key.ID); err != nil {
-		if err != digestset.ErrDigestNotFound {
+		if !errors.Is(err, digestset.ErrDigestNotFound) {
 			return err
 		}
 		if err := s.digestSet.Add(imagedigest.Digest(img.Key.ID)); err != nil {
@@ -330,7 +338,7 @@ func (s *store) add(img Image) error {
 		s.digestReferences = make(map[string]sets.Set[ImageIDKey])
 	}
 
-	if refs := (s.digestReferences[img.Key.ID]); refs == nil {
+	if refs := s.digestReferences[img.Key.ID]; refs == nil {
 		s.digestReferences[img.Key.ID] = sets.New(img.Key)
 	} else {
 		s.digestReferences[img.Key.ID].Insert(img.Key)
@@ -378,7 +386,7 @@ func (s *store) pin(imageID string, refKey RefKey) error {
 	defer s.lock.Unlock()
 	digest, err := s.digestSet.Lookup(imageID)
 	if err != nil {
-		if err == digestset.ErrDigestNotFound {
+		if errors.Is(err, digestset.ErrDigestNotFound) {
 			err = errdefs.ErrNotFound
 		}
 		return err
@@ -404,7 +412,7 @@ func (s *store) unpin(imageID string, refKey RefKey) error {
 	defer s.lock.Unlock()
 	digest, err := s.digestSet.Lookup(imageID)
 	if err != nil {
-		if err == digestset.ErrDigestNotFound {
+		if errors.Is(err, digestset.ErrDigestNotFound) {
 			err = errdefs.ErrNotFound
 		}
 		return err
@@ -434,7 +442,7 @@ func (s *store) get(imageID string, runtimeHandler string) (Image, error) {
 	defer s.lock.RUnlock()
 	digest, err := s.digestSet.Lookup(imageID)
 	if err != nil {
-		if err == digestset.ErrDigestNotFound {
+		if errors.Is(err, digestset.ErrDigestNotFound) {
 			err = errdefs.ErrNotFound
 		}
 		return Image{}, err
